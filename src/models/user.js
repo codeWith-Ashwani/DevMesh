@@ -62,6 +62,44 @@ const userSchema = new mongoose.Schema(
     skills: {
       type: [String],
     },
+    githubUrl: {
+      type: String,
+      trim: true,
+      validate(value) {
+        if (value && !validator.isURL(value, { protocols: ["http", "https"], require_protocol: true })) {
+          throw new Error("Invalid GitHub URL");
+        }
+      },
+    },
+    linkedInUrl: {
+      type: String,
+      trim: true,
+      validate(value) {
+        if (value && !validator.isURL(value, { protocols: ["http", "https"], require_protocol: true })) {
+          throw new Error("Invalid LinkedIn URL");
+        }
+      },
+    },
+    portfolioUrl: {
+      type: String,
+      trim: true,
+      validate(value) {
+        if (value && !validator.isURL(value, { protocols: ["http", "https"], require_protocol: true })) {
+          throw new Error("Invalid portfolio URL");
+        }
+      },
+    },
+    lookingFor: {
+      type: String,
+      enum: [
+        "Job opportunities",
+        "Project collaborators",
+        "Study partners",
+        "Mentorship",
+        "Freelance work",
+        "Open-source contributors",
+      ],
+    },
   },
   { timestamps: true } // automatically adds createdAt and updatedAt fields
 );
@@ -70,7 +108,7 @@ userSchema.index({ firstName: 1, lastName: 1 });
 
 userSchema.methods.getJWT = function () {
   const user = this;
-  const token = jwt.sign({ _id: user._id }, "DEV@Tinder$790", {
+  const token = jwt.sign({ _id: user._id }, "DEVMESH@790", {
     expiresIn: "1d",
   });
   return token;

@@ -18,6 +18,10 @@ usersRouter.get("/user/requests/received", userAuth, async (req, res) => {
       "photoUrl",
       "about",
       "skills",
+      "githubUrl",
+      "linkedInUrl",
+      "portfolioUrl",
+      "lookingFor",
     ]);
     if (connectionRequests.length === 0) {
       return res.status(404).json({
@@ -50,6 +54,10 @@ usersRouter.get("/user/connections", userAuth, async (req, res) => {
       "photoUrl",
       "about",
       "skills",
+      "githubUrl",
+      "linkedInUrl",
+      "portfolioUrl",
+      "lookingFor",
     ]);
 
     const data = connectionRequests.map((row) => {
@@ -101,7 +109,7 @@ usersRouter.get("/feed", userAuth, async (req, res) => {
         { _id: { $ne: loggedInUser._id } },
       ],
     })
-      .select("firstName lastName age photoUrl about skills")
+      .select("firstName lastName age photoUrl about skills githubUrl linkedInUrl portfolioUrl lookingFor")
       .skip(skip)
       .limit(limit);
 
