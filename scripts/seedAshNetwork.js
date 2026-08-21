@@ -1,7 +1,9 @@
 const mongoose = require("mongoose");
-require("../src/config/database");
+const connectDB = require("../src/config/database");
 const User = require("../src/models/user");
 const ConnectionRequest = require("../src/models/conectionRequest");
+connectDB();
+
 
 const TARGET_REQUESTS = 12;
 const TARGET_CONNECTIONS = 12;

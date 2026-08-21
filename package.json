@@ -8,7 +8,8 @@
     "dev": "nodemon src/app.js",
     "seed:users": "node scripts/seedUsers.js",
     "seed:ash-network": "node scripts/seedAshNetwork.js",
-    "seed:ash-project": "node scripts/seedAshProject.js"
+    "seed:ash-project": "node scripts/seedAshProject.js",
+    "test:security": "node scripts/verifySecurity.js"
   },
   "keywords": [
     "nodejs",

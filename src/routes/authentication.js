@@ -1,52 +1,59 @@
 const express = require("express");
-const { validateSingUpData } = require("../utils/validation");
+const { validateSingUpData, getSafeUser } = require("../utils/validation");
+const { getCookieOptions, getClearCookieOptions } = require("../utils/security");
 const authRouter = express.Router();
 const User = require("../models/user");
 const bcrypt = require("bcrypt");
-const jwt = require("jsonwebtoken");
 
 // signup API
 authRouter.post("/signup", async (req, res) => {
-  // const userObj = {
-  //   firstName: "Ashwani",
-  //   lastName: "Singh",
-  //   email: "ashwani@example.com",
-  //   password: "securepassword"
-  // };
-
-  // creating a new instance of User model
-  // const user = new User(userObj);
   try {
     // validation of data
     validateSingUpData(req);
 
     const { firstName, lastName, email, password } = req.body;
 
-    // Encrypt password
+    const normalizedEmail = email.toLowerCase().trim();
+    const existingUser = await User.findOne({ email: normalizedEmail });
+    if (existingUser) {
+      return res.status(409).json({ message: "Email is already registered" });
+    }
 
+    // Encrypt password
     const passwordHash = await bcrypt.hash(password, 10);
-    console.log("Hashed Password:", passwordHash);
 
     // create user object to be saved in the database
     const user = new User({
-      firstName,
-      lastName,
-      email,
+      firstName: firstName.trim(),
+      lastName: lastName ? lastName.trim() : undefined,
+      email: normalizedEmail,
       password: passwordHash,
-    }); // req.body will have the user data in JSON format sent by the client dynamically
+    });
 
     const savedUser = await user.save();
-
     const token = await savedUser.getJWT();
 
     // Add the token to cookie and send the response back to user
-    res.cookie("token", token, {
-      httpOnly: true,
-      expires: new Date(Date.now() + 86400000),
+    res.cookie("token", token, getCookieOptions());
+    return res.status(201).json({
+      message: "User signed up successfully",
+      data: getSafeUser(savedUser),
     });
-    res.json({ message: "User signed up successfully", data: savedUser });
   } catch (error) {
-    res.status(500).send("Error signing up user");
+    if (error.code === 11000) {
+      return res.status(409).json({ message: "Email is already registered" });
+    }
+    if (
+      error.name === "ValidationError" ||
+      (error.message &&
+        (error.message.includes("First name") ||
+          error.message.includes("Last name") ||
+          error.message.includes("Invalid email") ||
+          error.message.includes("Password")))
+    ) {
+      return res.status(400).json({ message: error.message });
+    }
+    return res.status(500).json({ message: "Error signing up user" });
   }
 });
 
@@ -54,40 +61,41 @@ authRouter.post("/signup", async (req, res) => {
 authRouter.post("/login", async (req, res) => {
   try {
     const { email, password } = req.body;
-    const user = await User.findOne({ email: email });
+    if (!email || !password) {
+      return res.status(400).json({ message: "Email and password are required" });
+    }
+
+    const normalizedEmail = typeof email === "string" ? email.toLowerCase().trim() : "";
+    const user = await User.findOne({ email: normalizedEmail });
     if (!user) {
-      return res.status(404).send("Invalid credentials");
+      return res.status(401).json({ message: "Invalid credentials" });
     }
+
     const isPasswordMatch = await bcrypt.compare(password, user.password);
-    if (isPasswordMatch) {
-      // Create a JWT Token
-
-      const token = await user.getJWT();
-
-      // Add the token to cookie and send the response back to user
-      res.cookie("token", token, {
-        httpOnly: true,
-        expires: new Date(Date.now() + 86400000),
-      });
-      res.send(user);
-    } else {
-      return res.status(401).send("Invalid credentials");
+    if (!isPasswordMatch) {
+      return res.status(401).json({ message: "Invalid credentials" });
     }
+
+    // Create a JWT Token
+    const token = await user.getJWT();
+
+    // Add the token to cookie and send the response back to user
+    res.cookie("token", token, getCookieOptions());
+    return res.json(getSafeUser(user));
   } catch (error) {
-    res.status(500).send("Error logging in user");
+    return res.status(500).json({ message: "Error logging in user" });
   }
 });
 
 // logout API
 authRouter.post("/logout", async (req, res) => {
   try {
-    res.cookie("token", null, {
-      expires: new Date(Date.now()),
-    });
-    res.send("User logged out successfully");
+    res.cookie("token", null, getClearCookieOptions());
+    return res.json({ message: "User logged out successfully" });
   } catch (error) {
-    res.status(500).send("Error logging out user");
+    return res.status(500).json({ message: "Error logging out user" });
   }
 });
 
 module.exports = authRouter;
+

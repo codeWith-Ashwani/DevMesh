@@ -106,11 +106,37 @@ const userSchema = new mongoose.Schema(
 
 userSchema.index({ firstName: 1, lastName: 1 });
 
+const { getJWTSecret } = require("../utils/security");
+
+userSchema.set("toJSON", {
+  transform: function (doc, ret) {
+    delete ret.password;
+    delete ret.__v;
+    return ret;
+  },
+});
+
+userSchema.set("toObject", {
+  transform: function (doc, ret) {
+    delete ret.password;
+    delete ret.__v;
+    return ret;
+  },
+});
+
 userSchema.methods.getJWT = function () {
   const user = this;
-  const token = jwt.sign({ _id: user._id }, "DEVMESH@790", {
+  const token = jwt.sign({ _id: user._id }, getJWTSecret(), {
     expiresIn: "1d",
   });
   return token;
 };
+
+userSchema.methods.toSafeObject = function () {
+  const userObj = this.toObject();
+  delete userObj.password;
+  delete userObj.__v;
+  return userObj;
+};
+
 module.exports = mongoose.model("User", userSchema);

@@ -1,17 +1,20 @@
 const express = require("express");
 const profileRouter = express.Router();
 const userAuth = require("../middlewares/auth");
-const { validate } = require("../models/user");
-const { validateEditProfileData } = require("../utils/validation");
+const {
+  validateEditProfileData,
+  validatePassword,
+  getSafeUser,
+} = require("../utils/validation");
 const bcrypt = require("bcrypt");
 
 // get user profile API
 profileRouter.get("/profile/view", userAuth, async (req, res) => {
   try {
-    const user = req.user;
-    res.send(user);
+    const safeUser = getSafeUser(req.user);
+    return res.json(safeUser);
   } catch (error) {
-    res.status(500).send("Error fetching profile");
+    return res.status(500).json({ message: "Error fetching profile" });
   }
 });
 
@@ -19,29 +22,32 @@ profileRouter.get("/profile/view", userAuth, async (req, res) => {
 profileRouter.patch("/profile/edit", userAuth, async (req, res) => {
   try {
     if (!validateEditProfileData(req)) {
-      throw new Error("Invalid fields in profile update");
+      return res.status(400).json({ message: "Invalid fields in profile update" });
     }
     const loggedInUser = req.user;
     loggedInUser.set(req.body);
-    await loggedInUser.save();
-    res.send({
-      message: `${loggedInUser.firstName} your updated successfully`,
-      data: loggedInUser,
+    const savedUser = await loggedInUser.save();
+    return res.json({
+      message: `${savedUser.firstName}, your profile was updated successfully`,
+      data: getSafeUser(savedUser),
     });
   } catch (error) {
-    res.status(500).send("Error updating profile" + error.message);
+    if (error.name === "ValidationError") {
+      return res.status(400).json({ message: error.message });
+    }
+    return res.status(500).json({ message: "Error updating profile" });
   }
 });
 
-// forgot password API
-profileRouter.post("/profile/forgot-password", userAuth, async (req, res) => {
+// password update handler
+const handlePasswordUpdate = async (req, res) => {
   try {
     const { password, newPassword } = req.body;
 
     if (!password || !newPassword) {
       return res
         .status(400)
-        .send({ message: "Both current and new passwords are required" });
+        .json({ message: "Both current and new passwords are required" });
     }
 
     const user = req.user;
@@ -49,8 +55,11 @@ profileRouter.post("/profile/forgot-password", userAuth, async (req, res) => {
     // Check old password
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
-      return res.status(400).send({ message: "Current password is incorrect" });
+      return res.status(400).json({ message: "Current password is incorrect" });
     }
+
+    // Validate new password rules
+    validatePassword(newPassword);
 
     // Hash new password
     const hashedPassword = await bcrypt.hash(newPassword, 10);
@@ -58,12 +67,22 @@ profileRouter.post("/profile/forgot-password", userAuth, async (req, res) => {
     user.password = hashedPassword;
     await user.save();
 
-    return res.send({ message: "Password updated successfully" });
+    return res.json({ message: "Password updated successfully" });
   } catch (error) {
-    return res.status(500).send("Error updating password: " + error.message);
+    if (
+      error.message &&
+      (error.message.includes("Password") ||
+        error.message.includes("password") ||
+        error.name === "ValidationError")
+    ) {
+      return res.status(400).json({ message: error.message });
+    }
+    return res.status(500).json({ message: "Error updating password" });
   }
-});
+};
 
-
+profileRouter.post("/profile/forgot-password", userAuth, handlePasswordUpdate);
+profileRouter.patch("/profile/password", userAuth, handlePasswordUpdate);
 
 module.exports = profileRouter;
+

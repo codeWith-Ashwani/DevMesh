@@ -1,7 +1,9 @@
 const bcrypt = require("bcrypt");
 const mongoose = require("mongoose");
-require("../src/config/database");
+const connectDB = require("../src/config/database");
 const User = require("../src/models/user");
+connectDB();
+
 
 const firstNames = ["Avery", "Noah", "Maya", "Theo", "Priya", "Ellis", "Zara", "Leo", "Amara", "Finn"];
 const lastNames = ["Morgan", "Shaw", "Patel", "Bennett", "Khan", "Reed", "Clark", "Taylor", "Jones", "Walker"];

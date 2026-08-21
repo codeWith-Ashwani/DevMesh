@@ -1,7 +1,9 @@
 const mongoose = require("mongoose");
-require("../src/config/database");
+const connectDB = require("../src/config/database");
 const User = require("../src/models/user");
 const Project = require("../src/models/project");
+connectDB();
+
 
 const title = "DevMesh — Find your next build partner";
 
