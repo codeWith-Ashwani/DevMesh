@@ -85,9 +85,9 @@ describe("Production Readiness & Platform Hardening Suite", () => {
       delete process.env.DB_CONNECTION_STRING;
       delete process.env.CLIENT_URL;
 
-      assert.throws(() => env.getJWTSecret(), /FATAL: JWT_SECRET environment variable is not defined/);
+      assert.throws(() => env.getJWTSecret(), /FATAL: JWT_SECRET environment variable is required/);
       assert.throws(() => env.getDBConnectionString(), /FATAL: DB_CONNECTION_STRING environment variable is required/);
-      assert.throws(() => env.getClientURL(), /FATAL: CLIENT_URL environment variable must be explicitly configured/);
+      assert.throws(() => env.getClientURL(), /FATAL: CLIENT_URL environment variable must be explicitly configured in production/);
     } finally {
       process.env.NODE_ENV = originalEnv;
       if (originalSecret !== undefined) process.env.JWT_SECRET = originalSecret;
@@ -95,4 +95,5 @@ describe("Production Readiness & Platform Hardening Suite", () => {
       if (originalClient !== undefined) process.env.CLIENT_URL = originalClient;
     }
   });
+
 });

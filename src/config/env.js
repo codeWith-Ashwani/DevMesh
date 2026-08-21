@@ -3,29 +3,25 @@ try {
     process.loadEnvFile();
   }
 } catch (e) {
-  // .env file is optional if environment variables are injected by container
+  // .env file is optional if environment variables are injected by container/host
 }
 
 const getJWTSecret = () => {
-  const isProd = process.env.NODE_ENV === "production";
   const secret = process.env.JWT_SECRET;
   if (!secret) {
-    if (isProd) {
-      throw new Error("FATAL: JWT_SECRET environment variable is not defined in production");
-    }
-    return "DEVMESH_DEV_SECRET_DO_NOT_USE_IN_PROD_123456789";
+    throw new Error(
+      "FATAL: JWT_SECRET environment variable is required. Please define it in your .env or environment configuration."
+    );
   }
   return secret;
 };
 
 const getDBConnectionString = () => {
-  const isProd = process.env.NODE_ENV === "production";
   const dbUri = process.env.DB_CONNECTION_STRING;
   if (!dbUri) {
-    if (isProd) {
-      throw new Error("FATAL: DB_CONNECTION_STRING environment variable is required in production");
-    }
-    return "mongodb+srv://work639280_db_user:La5udQvtNc1NELTr@cluster0.83xtjwl.mongodb.net/?appName=Cluster0";
+    throw new Error(
+      "FATAL: DB_CONNECTION_STRING environment variable is required. Please define it in your .env or environment configuration."
+    );
   }
   return dbUri;
 };
@@ -35,12 +31,14 @@ const getClientURL = () => {
   const clientUrl = process.env.CLIENT_URL;
   if (!clientUrl) {
     if (isProd) {
-      throw new Error("FATAL: CLIENT_URL environment variable must be explicitly configured in production");
+      throw new Error(
+        "FATAL: CLIENT_URL environment variable must be explicitly configured in production."
+      );
     }
     return "http://localhost:5173";
   }
   if (isProd && (clientUrl.includes("localhost") || clientUrl.includes("127.0.0.1"))) {
-    console.warn("WARNING: CLIENT_URL is pointing to localhost in production environment");
+    console.warn("WARNING: CLIENT_URL is pointing to localhost in production environment.");
   }
   return clientUrl;
 };

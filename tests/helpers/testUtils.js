@@ -18,6 +18,10 @@ let baseUrl = "";
 process.env.NODE_ENV = "test";
 process.env.JWT_SECRET = process.env.JWT_SECRET || "test_suite_super_secret_jwt_key_987654321";
 process.env.CLIENT_URL = process.env.CLIENT_URL || "http://localhost:5173";
+process.env.DB_CONNECTION_STRING =
+  process.env.DB_CONNECTION_STRING || "mongodb+srv://work639280_db_user:La5udQvtNc1NELTr@cluster0.83xtjwl.mongodb.net/?appName=Cluster0";
+
+
 
 const startTestServer = async () => {
   if (!server) {

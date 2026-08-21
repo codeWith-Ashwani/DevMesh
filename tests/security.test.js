@@ -35,24 +35,22 @@ describe("Security Regression & Protection Suite", () => {
     const origEnv = process.env.NODE_ENV;
     const origSecret = process.env.JWT_SECRET;
     try {
-      process.env.NODE_ENV = "production";
       delete process.env.JWT_SECRET;
-      assert.throws(() => getJWTSecret(), /FATAL: JWT_SECRET environment variable is not defined in production/);
+      assert.throws(() => getJWTSecret(), /FATAL: JWT_SECRET environment variable is required/);
     } finally {
       process.env.NODE_ENV = origEnv;
       process.env.JWT_SECRET = origSecret;
     }
   });
 
-  it("should enforce DB_CONNECTION_STRING in production", async () => {
+  it("should enforce DB_CONNECTION_STRING in all runtime modes", async () => {
     const origEnv = process.env.NODE_ENV;
     const origDb = process.env.DB_CONNECTION_STRING;
     try {
-      process.env.NODE_ENV = "production";
       delete process.env.DB_CONNECTION_STRING;
       await assert.rejects(
         async () => connectDB(),
-        /FATAL: DB_CONNECTION_STRING environment variable is required in production/
+        /FATAL: DB_CONNECTION_STRING environment variable is required/
       );
     } finally {
       process.env.NODE_ENV = origEnv;
@@ -63,6 +61,7 @@ describe("Security Regression & Protection Suite", () => {
       }
     }
   });
+
 
   it("should ensure Mongoose schemas and DTOs strip password hashes and __v", () => {
     const userDoc = new User({

@@ -64,11 +64,10 @@ async function runTests() {
     const originalEnv = process.env.NODE_ENV;
     const originalDbUri = process.env.DB_CONNECTION_STRING;
     try {
-      process.env.NODE_ENV = "production";
       delete process.env.DB_CONNECTION_STRING;
       await assert.rejects(
         async () => connectDB(),
-        /FATAL: DB_CONNECTION_STRING environment variable is required in production/
+        /FATAL: DB_CONNECTION_STRING environment variable is required/
       );
     } finally {
       process.env.NODE_ENV = originalEnv;
@@ -90,15 +89,15 @@ async function runTests() {
     const originalEnv = process.env.NODE_ENV;
     const originalSecret = process.env.JWT_SECRET;
     try {
-      process.env.NODE_ENV = "production";
       delete process.env.JWT_SECRET;
-      assert.throws(() => getJWTSecret(), /FATAL: JWT_SECRET environment variable is not defined in production/);
+      assert.throws(() => getJWTSecret(), /FATAL: JWT_SECRET environment variable is required/);
     } finally {
       process.env.NODE_ENV = originalEnv;
       process.env.JWT_SECRET = originalSecret;
     }
     console.log("✓ PASS: JWT Secret handling and production fail-safe verified.");
   }
+
 
   // 3. Cookie Security Options Test
   console.log("TEST 3: Cookie Security Configurations...");
