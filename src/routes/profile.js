@@ -1,6 +1,7 @@
 const express = require("express");
 const profileRouter = express.Router();
 const userAuth = require("../middlewares/auth");
+const { passwordUpdateLimiter } = require("../middlewares/rateLimiter");
 const {
   validateEditProfileData,
   validatePassword,
@@ -32,8 +33,8 @@ profileRouter.patch("/profile/edit", userAuth, async (req, res) => {
       data: getSafeUser(savedUser),
     });
   } catch (error) {
-    if (error.name === "ValidationError") {
-      return res.status(400).json({ message: error.message });
+    if (error.name === "ValidationError" || error.message) {
+      return res.status(400).json({ message: error.message || "Invalid profile data" });
     }
     return res.status(500).json({ message: "Error updating profile" });
   }
@@ -81,8 +82,19 @@ const handlePasswordUpdate = async (req, res) => {
   }
 };
 
-profileRouter.post("/profile/forgot-password", userAuth, handlePasswordUpdate);
-profileRouter.patch("/profile/password", userAuth, handlePasswordUpdate);
+profileRouter.post(
+  "/profile/forgot-password",
+  userAuth,
+  passwordUpdateLimiter,
+  handlePasswordUpdate
+);
+profileRouter.patch(
+  "/profile/password",
+  userAuth,
+  passwordUpdateLimiter,
+  handlePasswordUpdate
+);
 
 module.exports = profileRouter;
+
 

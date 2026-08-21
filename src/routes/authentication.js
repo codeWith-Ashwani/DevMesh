@@ -1,12 +1,13 @@
 const express = require("express");
 const { validateSingUpData, getSafeUser } = require("../utils/validation");
 const { getCookieOptions, getClearCookieOptions } = require("../utils/security");
+const { signupLimiter, loginLimiter } = require("../middlewares/rateLimiter");
 const authRouter = express.Router();
 const User = require("../models/user");
 const bcrypt = require("bcrypt");
 
 // signup API
-authRouter.post("/signup", async (req, res) => {
+authRouter.post("/signup", signupLimiter, async (req, res) => {
   try {
     // validation of data
     validateSingUpData(req);
@@ -58,7 +59,8 @@ authRouter.post("/signup", async (req, res) => {
 });
 
 // login API
-authRouter.post("/login", async (req, res) => {
+authRouter.post("/login", loginLimiter, async (req, res) => {
+
   try {
     const { email, password } = req.body;
     if (!email || !password) {

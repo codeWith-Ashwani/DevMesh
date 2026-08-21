@@ -24,5 +24,7 @@ const messageSchema = new mongoose.Schema(
 );
 
 messageSchema.index({ fromUserId: 1, toUserId: 1, createdAt: -1 });
+messageSchema.index({ toUserId: 1, fromUserId: 1, createdAt: -1 });
+
 
 module.exports = mongoose.model("Message", messageSchema);

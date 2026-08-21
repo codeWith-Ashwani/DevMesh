@@ -1,19 +1,11 @@
+const env = require("../config/env");
+
 const getJWTSecret = () => {
-  const secret = process.env.JWT_SECRET;
-  if (!secret) {
-    if (process.env.NODE_ENV === "production") {
-      throw new Error(
-        "FATAL: JWT_SECRET environment variable is not defined in production environment."
-      );
-    }
-    // Fallback for local development if JWT_SECRET is not explicitly set in .env
-    return "dev_default_jwt_secret_devmesh_secure_key";
-  }
-  return secret;
+  return env.getJWTSecret();
 };
 
 const getCookieOptions = (customOptions = {}) => {
-  const isProduction = process.env.NODE_ENV === "production";
+  const isProduction = env.isProduction;
   const defaultMaxAge = 24 * 60 * 60 * 1000; // 1 day in milliseconds
 
   return {
@@ -26,7 +18,7 @@ const getCookieOptions = (customOptions = {}) => {
 };
 
 const getClearCookieOptions = () => {
-  const isProduction = process.env.NODE_ENV === "production";
+  const isProduction = env.isProduction;
   return {
     httpOnly: true,
     secure: isProduction,

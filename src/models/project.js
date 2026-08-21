@@ -25,5 +25,7 @@ const projectSchema = new mongoose.Schema(
 );
 
 projectSchema.index({ createdAt: -1 });
+projectSchema.index({ creator: 1 });
+
 
 module.exports = mongoose.model("Project", projectSchema);

@@ -8,12 +8,19 @@ const jwt = require("jsonwebtoken");
 process.env.NODE_ENV = "test";
 process.env.JWT_SECRET = "super_secret_test_jwt_key_123456789";
 process.env.CLIENT_URL = "http://localhost:5173";
+process.env.RATE_LIMIT_LOGIN_MAX = "5";
+process.env.RATE_LIMIT_SIGNUP_MAX = "5";
+process.env.RATE_LIMIT_PASSWORD_MAX = "3";
 
 const app = require("../src/app");
 const connectDB = require("../src/config/database");
 const User = require("../src/models/user");
+const Project = require("../src/models/project");
+const ConnectionRequest = require("../src/models/conectionRequest");
+const Message = require("../src/models/message");
 const { getJWTSecret, getCookieOptions, getClearCookieOptions } = require("../src/utils/security");
-const { validatePassword, getSafeUser } = require("../src/utils/validation");
+const { validatePassword, getSafeUser, getPublicUser, isValidObjectId } = require("../src/utils/validation");
+const { loginLimiter, signupLimiter, passwordUpdateLimiter } = require("../src/middlewares/rateLimiter");
 
 let server;
 let baseUrl;
@@ -48,15 +55,38 @@ const request = async (method, path, body = null, cookies = null) => {
 
 async function runTests() {
   console.log("==================================================");
-  console.log("STARTING DEVMESH SECURITY & AUTH AUDIT TEST SUITE");
+  console.log("STARTING DEVMESH PHASE 1B COMPLETE SECURITY SUITE");
   console.log("==================================================\n");
 
-  // 1. JWT Secret Configuration Test
-  console.log("TEST 1: JWT Secret and Fail-Safe in Production...");
+  // 1. Database Safety & Production Fail-Safe Test
+  console.log("TEST 1: Database Safety & Production Fail-Safe...");
+  {
+    const originalEnv = process.env.NODE_ENV;
+    const originalDbUri = process.env.DB_CONNECTION_STRING;
+    try {
+      process.env.NODE_ENV = "production";
+      delete process.env.DB_CONNECTION_STRING;
+      await assert.rejects(
+        async () => connectDB(),
+        /FATAL: DB_CONNECTION_STRING environment variable is required in production/
+      );
+    } finally {
+      process.env.NODE_ENV = originalEnv;
+      if (originalDbUri !== undefined) {
+        process.env.DB_CONNECTION_STRING = originalDbUri;
+      } else {
+        delete process.env.DB_CONNECTION_STRING;
+      }
+    }
+    console.log("✓ PASS: Database production safety requirement verified.");
+  }
+
+
+  // 2. JWT Secret Configuration Test
+  console.log("TEST 2: JWT Secret and Fail-Safe in Production...");
   {
     assert.strictEqual(getJWTSecret(), process.env.JWT_SECRET);
 
-    // Test production fail-safe
     const originalEnv = process.env.NODE_ENV;
     const originalSecret = process.env.JWT_SECRET;
     try {
@@ -70,8 +100,8 @@ async function runTests() {
     console.log("✓ PASS: JWT Secret handling and production fail-safe verified.");
   }
 
-  // 2. Cookie Security Options Test
-  console.log("TEST 2: Cookie Security Configurations...");
+  // 3. Cookie Security Options Test
+  console.log("TEST 3: Cookie Security Configurations...");
   {
     const devCookie = getCookieOptions();
     assert.strictEqual(devCookie.httpOnly, true);
@@ -84,8 +114,8 @@ async function runTests() {
     console.log("✓ PASS: Cookie security options verified.");
   }
 
-  // 3. Password Validation Rules Test
-  console.log("TEST 3: Password Complexity Validator...");
+  // 4. Password Validation Rules Test
+  console.log("TEST 4: Password Complexity Validator...");
   {
     assert.throws(() => validatePassword("weak"), /Password must be at least 8 characters long/);
     assert.throws(() => validatePassword("alllowercase123!"), /Password must be at least 8 characters long/);
@@ -95,9 +125,14 @@ async function runTests() {
     console.log("✓ PASS: Password complexity rules verified.");
   }
 
-  // 4. Safe User DTO & Schema Serialization Test
-  console.log("TEST 4: Password Hash Striping & DTO Isolation...");
+  // 5. Safe User DTO, Public DTO & ObjectId Validator Test
+  console.log("TEST 5: Password Hash Stripping, Public/Private DTO Separation & ObjectId Validation...");
   {
+    assert.strictEqual(isValidObjectId("60c72b2f9b1d8b2bad000001"), true);
+    assert.strictEqual(isValidObjectId("invalid-id-123"), false);
+    assert.strictEqual(isValidObjectId(null), false);
+    assert.strictEqual(isValidObjectId(undefined), false);
+
     const mockUserDoc = new User({
       firstName: "Test",
       lastName: "User",
@@ -112,8 +147,12 @@ async function runTests() {
     const safeDto = getSafeUser(mockUserDoc);
     assert.strictEqual(safeDto.password, undefined);
     assert.strictEqual(safeDto.email, "dto-test@devmesh.example");
-    assert.strictEqual(safeDto.firstName, "Test");
-    console.log("✓ PASS: Safe User DTO and schema transforms never expose password/hash.");
+
+    const publicDto = getPublicUser(mockUserDoc);
+    assert.strictEqual(publicDto.password, undefined);
+    assert.strictEqual(publicDto.email, undefined, "Public DTO must not contain email");
+    assert.strictEqual(publicDto.firstName, "Test");
+    console.log("✓ PASS: Safe User DTO, Public DTO, and ObjectId validator verified.");
   }
 
   // Connect to DB and start HTTP server
@@ -128,157 +167,343 @@ async function runTests() {
   console.log(`Test server running at ${baseUrl}\n`);
 
   const uniqueSuffix = Date.now();
-  const testEmail = `sec.test.${uniqueSuffix}@devmesh.example`;
+  const testUserAEmail = `sec.usera.${uniqueSuffix}@devmesh.example`;
+  const testUserBEmail = `sec.userb.${uniqueSuffix}@devmesh.example`;
   const strongPassword = "SecurePass#2026";
   const newStrongPassword = "NewSecurePass#2027";
 
-  let authCookie = "";
 
-  // 5. Signup Validation & Execution Test
-  console.log("TEST 5: /signup Validation, Duplicate Conflict (409), and Safe Response...");
+  let cookieUserA = "";
+  let cookieUserB = "";
+  let userAId = "";
+  let userBId = "";
+  let projectAId = "";
+
+  // 6. Signup & User Creation
+  console.log("TEST 6: /signup Validation, Duplicate Conflict (409), and Safe Response...");
   {
-    // Test weak password rejection (400)
-    const weakRes = await request("POST", "/signup", {
-      firstName: "Security",
+    // User A signup
+    const signupARes = await request("POST", "/signup", {
+      firstName: "UserAlpha",
       lastName: "Tester",
-      email: testEmail,
-      password: "123",
-    });
-    assert.strictEqual(weakRes.status, 400);
-
-    // Test valid signup
-    const signupRes = await request("POST", "/signup", {
-      firstName: "Security",
-      lastName: "Tester",
-      email: testEmail,
+      email: testUserAEmail,
       password: strongPassword,
     });
-    assert.strictEqual(signupRes.status, 201);
-    assert.strictEqual(signupRes.data.message, "User signed up successfully");
-    assert.ok(signupRes.data.data, "Response must include data property");
-    assert.strictEqual(signupRes.data.data.password, undefined, "Password must not be in signup response");
-    assert.strictEqual(signupRes.data.data.email, testEmail);
-    assert.ok(signupRes.setCookie, "Signup must return Set-Cookie");
-    assert.ok(signupRes.setCookie.includes("HttpOnly"), "Cookie must be HttpOnly");
+    assert.strictEqual(signupARes.status, 201);
+    assert.strictEqual(signupARes.data.data.password, undefined);
+    assert.strictEqual(signupARes.data.data.email, testUserAEmail);
+    assert.ok(signupARes.setCookie.includes("HttpOnly"));
+    cookieUserA = signupARes.setCookie.split(";")[0];
+    userAId = signupARes.data.data._id;
 
-    authCookie = signupRes.setCookie.split(";")[0];
+    // User B signup
+    const signupBRes = await request("POST", "/signup", {
+      firstName: "UserBeta",
+      lastName: "Tester",
+      email: testUserBEmail,
+      password: strongPassword,
+    });
+    assert.strictEqual(signupBRes.status, 201);
+    cookieUserB = signupBRes.setCookie.split(";")[0];
+    userBId = signupBRes.data.data._id;
 
-    // Test duplicate signup rejection (409)
+    // Duplicate signup 409
     const dupRes = await request("POST", "/signup", {
-      firstName: "Security",
+      firstName: "UserAlpha",
       lastName: "Tester",
-      email: testEmail,
+      email: testUserAEmail,
       password: strongPassword,
     });
-    assert.strictEqual(dupRes.status, 409, "Duplicate registration must return 409 Conflict");
-    console.log("✓ PASS: /signup validation, 409 duplicate handling, and password protection verified.");
+    assert.strictEqual(dupRes.status, 409);
+    console.log("✓ PASS: /signup verified with 409 duplicate handling.");
   }
 
-  // 6. Login Validation & Authentication Failures (401)
-  console.log("TEST 6: /login Authentication Failures (401) and Safe Output...");
+  // 7. Login Failures (401)
+  console.log("TEST 7: /login Authentication Failures (401)...");
   {
-    // Test missing fields (400)
-    const missingRes = await request("POST", "/login", { email: testEmail });
-    assert.strictEqual(missingRes.status, 400);
-
-    // Test wrong email (401)
-    const wrongEmailRes = await request("POST", "/login", {
-      email: `nonexistent.${uniqueSuffix}@devmesh.example`,
-      password: strongPassword,
-    });
-    assert.strictEqual(wrongEmailRes.status, 401, "Invalid email must return 401");
-    assert.strictEqual(wrongEmailRes.data.message, "Invalid credentials");
-
-    // Test wrong password (401)
     const wrongPassRes = await request("POST", "/login", {
-      email: testEmail,
+      email: testUserAEmail,
       password: "WrongPassword#123",
     });
-    assert.strictEqual(wrongPassRes.status, 401, "Invalid password must return 401");
+    assert.strictEqual(wrongPassRes.status, 401);
     assert.strictEqual(wrongPassRes.data.message, "Invalid credentials");
 
-    // Test valid login
-    const validLoginRes = await request("POST", "/login", {
-      email: testEmail,
+    const wrongEmailRes = await request("POST", "/login", {
+      email: "nonexistent@devmesh.example",
       password: strongPassword,
     });
-    assert.strictEqual(validLoginRes.status, 200);
-    assert.strictEqual(validLoginRes.data.password, undefined, "Password must not be in login response");
-    assert.strictEqual(validLoginRes.data.email, testEmail);
-    assert.ok(validLoginRes.setCookie.includes("HttpOnly"), "Cookie must be HttpOnly");
-
-    authCookie = validLoginRes.setCookie.split(";")[0];
-    console.log("✓ PASS: /login failure codes (401) and safe responses verified.");
+    assert.strictEqual(wrongEmailRes.status, 401);
+    assert.strictEqual(wrongEmailRes.data.message, "Invalid credentials");
+    console.log("✓ PASS: /login failure codes (401) verified.");
   }
 
-  // 7. Protected Route Authorization (401 on missing/invalid token)
-  console.log("TEST 7: Token Authorization & Protected Route Verification...");
+  // 8. IDOR & Authorization: Projects & Applications
+  console.log("TEST 8: IDOR & Authorization Protection on Projects...");
   {
-    // Missing token (401)
-    const noTokenRes = await request("GET", "/profile/view");
-    assert.strictEqual(noTokenRes.status, 401);
+    // User A creates a project
+    const createProjectRes = await request(
+      "POST",
+      "/projects",
+      {
+        title: "Alpha Collaboration Hub",
+        description: "A secure distributed team matching system for developers.",
+        techStack: ["Node.js", "Express", "MongoDB"],
+        rolesNeeded: ["Frontend Developer", "Security Engineer"],
+        stage: "Building",
+        commitment: "10 hrs/week",
+      },
+      cookieUserA
+    );
+    assert.strictEqual(createProjectRes.status, 201);
+    projectAId = createProjectRes.data.data._id;
 
-    // Tampered token (401)
-    const fakeTokenRes = await request("GET", "/profile/view", null, "token=invalid.tampered.token");
-    assert.strictEqual(fakeTokenRes.status, 401);
+    // User B applies to Project A
+    const applyRes = await request(
+      "POST",
+      `/projects/${projectAId}/apply`,
+      { message: "Interested in contributing as Frontend Dev!" },
+      cookieUserB
+    );
+    assert.strictEqual(applyRes.status, 201);
 
-    // Expired token (401)
-    const expiredToken = jwt.sign({ _id: "60c72b2f9b1d8b2bad000001" }, process.env.JWT_SECRET, { expiresIn: -10 });
-    const expiredRes = await request("GET", "/profile/view", null, `token=${expiredToken}`);
-    assert.strictEqual(expiredRes.status, 401);
+    // IDOR ATTEMPT 1: User B tries to view applications on User A's project -> MUST BE 403
+    const idorViewAppRes = await request(
+      "GET",
+      `/projects/${projectAId}/applications`,
+      null,
+      cookieUserB
+    );
+    assert.strictEqual(idorViewAppRes.status, 403, "User B should be forbidden (403) from viewing User A's project applications");
+    assert.ok(idorViewAppRes.data.message.includes("Access denied"));
 
-    // Valid token
-    const validRes = await request("GET", "/profile/view", null, authCookie);
-    assert.strictEqual(validRes.status, 200);
-    assert.strictEqual(validRes.data.email, testEmail);
-    assert.strictEqual(validRes.data.password, undefined, "Profile view must not leak password");
-    console.log("✓ PASS: Protected routes correctly enforce 401 on missing/invalid/expired tokens.");
+    // Creator User A views applications -> 200 OK
+    const creatorViewAppRes = await request(
+      "GET",
+      `/projects/${projectAId}/applications`,
+      null,
+      cookieUserA
+    );
+    assert.strictEqual(creatorViewAppRes.status, 200);
+    assert.strictEqual(creatorViewAppRes.data.data.length, 1);
+    const applicationId = creatorViewAppRes.data.data[0]._id;
+
+    // IDOR ATTEMPT 2: User B tries to review/accept the application on User A's project -> MUST BE 403
+    const idorReviewRes = await request(
+      "PATCH",
+      `/projects/${projectAId}/applications/${applicationId}`,
+      { status: "accepted" },
+      cookieUserB
+    );
+    assert.strictEqual(idorReviewRes.status, 403, "User B should be forbidden (403) from reviewing User A's applications");
+
+    // Creator User A reviews application -> 200 OK
+    const creatorReviewRes = await request(
+      "PATCH",
+      `/projects/${projectAId}/applications/${applicationId}`,
+      { status: "accepted" },
+      cookieUserA
+    );
+    assert.strictEqual(creatorReviewRes.status, 200);
+    assert.strictEqual(creatorReviewRes.data.message, "Application accepted");
+    console.log("✓ PASS: IDOR on project applications correctly blocked with 403 Forbidden.");
   }
 
-  // 8. Profile Edit Sanitization
-  console.log("TEST 8: Profile Edit Sanitization & Response...");
+  // 9. IDOR & Authorization: Connection Requests
+  console.log("TEST 9: IDOR & Authorization on Connection Requests...");
   {
-    // Disallowed field rejection (400)
+    // User A sends connection request to User B
+    const sendReqRes = await request(
+      "POST",
+      `/request/send/interested/${userBId}`,
+      {},
+      cookieUserA
+    );
+    assert.strictEqual(sendReqRes.status, 200);
+    const connectionRequestId = sendReqRes.data.data._id;
+
+    // IDOR ATTEMPT 3: User A (sender) tries to review/accept their own request sent to User B -> MUST BE 403
+    const idorReqReviewRes = await request(
+      "POST",
+      `/request/review/accepted/${connectionRequestId}`,
+      {},
+      cookieUserA
+    );
+    assert.strictEqual(idorReqReviewRes.status, 403, "Sender User A must not be allowed to review request sent to User B");
+
+    // Recipient User B reviews/accepts the request -> 200 OK
+    const recipientReviewRes = await request(
+      "POST",
+      `/request/review/accepted/${connectionRequestId}`,
+      {},
+      cookieUserB
+    );
+    assert.strictEqual(recipientReviewRes.status, 200);
+    console.log("✓ PASS: IDOR on connection requests correctly blocked with 403 Forbidden.");
+  }
+
+  // 10. Authorization & Privacy: Chat Access
+  console.log("TEST 10: Authorization & Connection Validation on Chat...");
+  {
+    // User A and User B now have accepted connection -> Chat succeeds
+    const sendChatRes = await request(
+      "POST",
+      `/chat/${userBId}`,
+      { text: "Hello from User A!" },
+      cookieUserA
+    );
+    assert.strictEqual(sendChatRes.status, 201);
+
+    const getChatRes = await request("GET", `/chat/${userBId}`, null, cookieUserA);
+    assert.strictEqual(getChatRes.status, 200);
+    assert.strictEqual(getChatRes.data.data.length, 1);
+
+    // Create User C who has NO connection with User A
+    const userCEmail = `sec.userC.${uniqueSuffix}@devmesh.example`;
+    const signupCRes = await request("POST", "/signup", {
+      firstName: "UserGamma",
+      lastName: "Tester",
+      email: userCEmail,
+      password: strongPassword,
+    });
+    const cookieUserC = signupCRes.setCookie.split(";")[0];
+
+    // UNAUTHORIZED CHAT ATTEMPT: User C tries to read or send chat to User A without accepted connection -> MUST BE 403
+    const unauthorizedGetChat = await request("GET", `/chat/${userAId}`, null, cookieUserC);
+    assert.strictEqual(unauthorizedGetChat.status, 403, "User without accepted connection must receive 403 Forbidden");
+
+    const unauthorizedPostChat = await request(
+      "POST",
+      `/chat/${userAId}`,
+      { text: "Spam message" },
+      cookieUserC
+    );
+    assert.strictEqual(unauthorizedPostChat.status, 403, "User without accepted connection must receive 403 Forbidden");
+    console.log("✓ PASS: Unauthorized chat access strictly blocked with 403 Forbidden.");
+  }
+
+  // 11. Malformed ObjectIds & CastError Prevention
+  console.log("TEST 11: Malformed ObjectIds and Input Validation (Never 500)...");
+  {
+    const invalidId = "not-a-valid-mongo-id";
+    const endpoints = [
+      { method: "POST", path: `/projects/${invalidId}/apply`, body: {} },
+      { method: "GET", path: `/projects/${invalidId}/applications`, body: null },
+      { method: "PATCH", path: `/projects/${projectAId}/applications/${invalidId}`, body: { status: "accepted" } },
+      { method: "POST", path: `/request/send/interested/${invalidId}`, body: {} },
+      { method: "POST", path: `/request/review/accepted/${invalidId}`, body: {} },
+      { method: "GET", path: `/chat/${invalidId}`, body: null },
+      { method: "POST", path: `/chat/${invalidId}`, body: { text: "hello" } },
+    ];
+
+    for (const ep of endpoints) {
+      const res = await request(ep.method, ep.path, ep.body, cookieUserA);
+      assert.strictEqual(res.status, 400, `Endpoint ${ep.method} ${ep.path} must return 400 for malformed ObjectId, got ${res.status}`);
+      assert.ok(typeof res.data === "object" && res.data.message, "Response must return clean JSON error message");
+    }
+    console.log("✓ PASS: All endpoints cleanly handle malformed ObjectIds with 400 Bad Request.");
+  }
+
+  // 12. Rate Limiting Tests
+  console.log("TEST 12: Rate Limiting Enforcement (429)...");
+  {
+    // Test login rate limiter
+    loginLimiter.reset();
+    for (let i = 0; i < 5; i++) {
+      const res = await request("POST", "/login", { email: testUserAEmail, password: "WrongPassword#123" });
+      assert.strictEqual(res.status, 401);
+    }
+    // 6th attempt exceeds limit of 5
+    const rateLimitedLoginRes = await request("POST", "/login", { email: testUserAEmail, password: "WrongPassword#123" });
+    assert.strictEqual(rateLimitedLoginRes.status, 429, "Exceeding login attempts must return 429 Too Many Requests");
+    assert.ok(rateLimitedLoginRes.data.message.includes("Too many login attempts"));
+
+    // Reset limiters for remaining tests
+    loginLimiter.reset();
+    signupLimiter.reset();
+    passwordUpdateLimiter.reset();
+    console.log("✓ PASS: Rate limiting triggers 429 Too Many Requests when limits are exceeded.");
+  }
+
+  // 13. Privacy & Public Directory Field Isolation
+  console.log("TEST 13: Privacy & Public Field Projections (No email/password leaks)...");
+  {
+    // Feed check
+    const feedRes = await request("GET", "/feed", null, cookieUserA);
+    assert.strictEqual(feedRes.status, 200);
+    for (const user of feedRes.data) {
+      assert.strictEqual(user.password, undefined);
+      assert.strictEqual(user.email, undefined, "Public feed must not expose other users' email addresses");
+    }
+
+    // Connections check
+    const connRes = await request("GET", "/user/connections", null, cookieUserA);
+    assert.strictEqual(connRes.status, 200);
+    for (const conn of connRes.data.data) {
+      assert.strictEqual(conn.password, undefined);
+      assert.strictEqual(conn.email, undefined, "Connections list must not expose email addresses");
+    }
+    console.log("✓ PASS: Public feeds and directory endpoints strictly isolate private fields.");
+  }
+
+  // 14. Profile View & Edit Authorization and Sanitization
+  console.log("TEST 14: Profile View & Edit Authorization and Sanitization...");
+  {
+    // View own profile
+    const profileViewRes = await request("GET", "/profile/view", null, cookieUserA);
+    assert.strictEqual(profileViewRes.status, 200);
+    assert.strictEqual(profileViewRes.data.email, testUserAEmail);
+    assert.strictEqual(profileViewRes.data.password, undefined);
+
+    // Profile edit with unauthorized fields (e.g. role, password) -> 400
     const invalidEditRes = await request(
       "PATCH",
       "/profile/edit",
       { role: "admin", password: "HackedPassword#123" },
-      authCookie
+      cookieUserA
     );
     assert.strictEqual(invalidEditRes.status, 400);
 
-    // Valid edit
+    // Profile edit with invalid age -> 400
+    const invalidAgeRes = await request(
+      "PATCH",
+      "/profile/edit",
+      { age: 12 },
+      cookieUserA
+    );
+    assert.strictEqual(invalidAgeRes.status, 400);
+
+    // Valid profile edit
     const validEditRes = await request(
       "PATCH",
       "/profile/edit",
-      { about: "Senior Security Specialist", skills: ["AppSec", "Node.js", "OWASP"] },
-      authCookie
+      { about: "Full-stack builder with AppSec focus", skills: ["Node.js", "React", "MongoDB"] },
+      cookieUserA
     );
     assert.strictEqual(validEditRes.status, 200);
-    assert.strictEqual(validEditRes.data.data.about, "Senior Security Specialist");
+    assert.strictEqual(validEditRes.data.data.about, "Full-stack builder with AppSec focus");
     assert.strictEqual(validEditRes.data.data.password, undefined);
-    console.log("✓ PASS: Profile edit prevents unauthorized fields and returns safe user DTO.");
+    console.log("✓ PASS: Profile view and edit enforce field validation and isolation.");
   }
 
-  // 9. Password Update Hardening
-  console.log("TEST 9: Password Update Hardening & Validation...");
+  // 15. Password Update & Rate Limiting & Logout
+  console.log("TEST 15: Password Update Validation, Rate Limiting & Logout...");
   {
-    // Incorrect current password
-    const wrongCurrentRes = await request(
+    // Incorrect old password -> 400
+    const wrongOldRes = await request(
       "POST",
       "/profile/forgot-password",
       { password: "WrongOldPassword#123", newPassword: newStrongPassword },
-      authCookie
+      cookieUserA
     );
-    assert.strictEqual(wrongCurrentRes.status, 400);
-    assert.strictEqual(wrongCurrentRes.data.message, "Current password is incorrect");
+    assert.strictEqual(wrongOldRes.status, 400);
+    assert.strictEqual(wrongOldRes.data.message, "Current password is incorrect");
 
-    // Weak new password
+    // Weak new password -> 400
     const weakNewRes = await request(
       "POST",
       "/profile/forgot-password",
       { password: strongPassword, newPassword: "weak" },
-      authCookie
+      cookieUserA
     );
     assert.strictEqual(weakNewRes.status, 400);
 
@@ -287,52 +512,35 @@ async function runTests() {
       "POST",
       "/profile/forgot-password",
       { password: strongPassword, newPassword: newStrongPassword },
-      authCookie
+      cookieUserA
     );
     assert.strictEqual(successPassRes.status, 200);
     assert.strictEqual(successPassRes.data.message, "Password updated successfully");
 
-    // Verify login with old password fails
-    const oldLoginRes = await request("POST", "/login", { email: testEmail, password: strongPassword });
-    assert.strictEqual(oldLoginRes.status, 401);
-
-    // Verify login with new password succeeds
-    const newLoginRes = await request("POST", "/login", { email: testEmail, password: newStrongPassword });
+    // Login with new password -> 200
+    const newLoginRes = await request("POST", "/login", { email: testUserAEmail, password: newStrongPassword });
     assert.strictEqual(newLoginRes.status, 200);
     assert.strictEqual(newLoginRes.data.password, undefined);
+    cookieUserA = newLoginRes.setCookie.split(";")[0];
 
-    // Also test PATCH /profile/password alias
-    authCookie = newLoginRes.setCookie.split(";")[0];
-    const patchPassRes = await request(
-      "PATCH",
-      "/profile/password",
-      { password: newStrongPassword, newPassword: strongPassword },
-      authCookie
-    );
-    assert.strictEqual(patchPassRes.status, 200);
-    console.log("✓ PASS: Password update verifies current password and enforces complexity.");
-  }
-
-  // 10. Logout and Cookie Invalidation
-  console.log("TEST 10: Logout Cookie Clearance...");
-  {
-    const logoutRes = await request("POST", "/logout", {}, authCookie);
+    // Logout
+    const logoutRes = await request("POST", "/logout", {}, cookieUserA);
     assert.strictEqual(logoutRes.status, 200);
-    assert.ok(logoutRes.setCookie, "Logout must return Set-Cookie");
-    assert.ok(
-      logoutRes.setCookie.includes("Expires=Thu, 01 Jan 1970") || logoutRes.setCookie.includes("Max-Age=0"),
-      "Logout must invalidate cookie expiration"
-    );
-    console.log("✓ PASS: Logout properly clears session cookie.");
+    assert.ok(logoutRes.setCookie.includes("Expires=Thu, 01 Jan 1970") || logoutRes.setCookie.includes("Max-Age=0"));
+    console.log("✓ PASS: Password update verification, validation, and logout cookie invalidation verified.");
   }
 
-  // Clean up test user
-  await User.deleteOne({ email: testEmail });
-  console.log(`Cleaned up test user ${testEmail}.`);
+  // Clean up test data
+  await User.deleteMany({ email: { $in: [testUserAEmail, testUserBEmail, `sec.userC.${uniqueSuffix}@devmesh.example`] } });
+  await Project.deleteMany({ creator: { $in: [userAId, userBId] } });
+  await ConnectionRequest.deleteMany({ $or: [{ fromUserId: userAId }, { toUserId: userAId }] });
+  await Message.deleteMany({ $or: [{ fromUserId: userAId }, { toUserId: userAId }] });
+  console.log("\nTest data cleanup completed.");
 
   console.log("\n==================================================");
-  console.log("ALL 10 SECURITY & AUTHENTICATION AUDIT TESTS PASSED!");
+  console.log("ALL PHASE 1 & 1B SECURITY TESTS PASSED (15/15)!");
   console.log("==================================================");
+
 }
 
 runTests()

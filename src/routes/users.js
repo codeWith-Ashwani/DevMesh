@@ -3,6 +3,9 @@ const usersRouter = express.Router();
 const ConnectionRequestModel = require("../models/conectionRequest");
 const userAuth = require("../middlewares/auth");
 const User = require("../models/user");
+const { PUBLIC_USER_FIELDS } = require("../utils/validation");
+
+const publicProjection = PUBLIC_USER_FIELDS.filter((f) => f !== "_id");
 
 // Get all the pending connection requests for a user
 usersRouter.get("/user/requests/received", userAuth, async (req, res) => {
@@ -11,30 +14,22 @@ usersRouter.get("/user/requests/received", userAuth, async (req, res) => {
     const connectionRequests = await ConnectionRequestModel.find({
       toUserId: loggedInUser._id,
       status: "interested",
-    }).populate("fromUserId", [
-      "firstName",
-      "lastName",
-      "age",
-      "photoUrl",
-      "about",
-      "skills",
-      "githubUrl",
-      "linkedInUrl",
-      "portfolioUrl",
-      "lookingFor",
-    ]);
+    })
+      .populate("fromUserId", publicProjection)
+      .lean();
+
     if (connectionRequests.length === 0) {
       return res.status(404).json({
         message: "No pending connection requests found",
       });
     }
 
-    res.status(200).json({
+    return res.status(200).json({
       message: "Connection requests fetched successfully",
       data: connectionRequests,
     });
   } catch (error) {
-    res.status(500).send("Error fetching connection requests");
+    return res.status(500).json({ message: "Error fetching connection requests" });
   }
 });
 
@@ -47,21 +42,13 @@ usersRouter.get("/user/connections", userAuth, async (req, res) => {
         { toUserId: loggedInUser._id, status: "accepted" },
         { fromUserId: loggedInUser._id, status: "accepted" },
       ],
-    }).populate("toUserId fromUserId", [
-      "firstName",
-      "lastName",
-      "age",
-      "photoUrl",
-      "about",
-      "skills",
-      "githubUrl",
-      "linkedInUrl",
-      "portfolioUrl",
-      "lookingFor",
-    ]);
+    })
+      .populate("toUserId fromUserId", publicProjection)
+      .lean();
 
     const data = connectionRequests.map((row) => {
-      if (row.fromUserId._id.equals(loggedInUser._id)) {
+      const fromId = row.fromUserId?._id ? row.fromUserId._id.toString() : row.fromUserId?.toString();
+      if (fromId === loggedInUser._id.toString()) {
         return row.toUserId;
       } else {
         return row.fromUserId;
@@ -74,12 +61,12 @@ usersRouter.get("/user/connections", userAuth, async (req, res) => {
       });
     }
 
-    res.status(200).json({
+    return res.status(200).json({
       message: "Connections fetched successfully",
       data,
     });
   } catch (error) {
-    res.status(500).send("Error fetching users");
+    return res.status(500).json({ message: "Error fetching users" });
   }
 });
 
@@ -88,19 +75,26 @@ usersRouter.get("/feed", userAuth, async (req, res) => {
   try {
     const loggedInUser = req.user;
 
-    const page = parseInt(req.query.page) || 1;
-    let limit = parseInt(req.query.limit) || 10;
-    if (limit > 50) limit = 50; // Max limit is 50
+    const parsedPage = parseInt(req.query.page, 10);
+    const page = !isNaN(parsedPage) && parsedPage > 0 ? parsedPage : 1;
+
+    const parsedLimit = parseInt(req.query.limit, 10);
+    let limit = !isNaN(parsedLimit) && parsedLimit > 0 ? parsedLimit : 10;
+    if (limit > 50) limit = 50;
+
     const skip = (page - 1) * limit;
 
     // Find all connection requests sent and received
     const connectionRequests = await ConnectionRequestModel.find({
       $or: [{ toUserId: loggedInUser._id }, { fromUserId: loggedInUser._id }],
-    }).select("fromUserId toUserId");
+    })
+      .select("fromUserId toUserId")
+      .lean();
+
     const hideUsersFromFeed = new Set();
     connectionRequests.forEach((request) => {
-      hideUsersFromFeed.add(request.fromUserId.toString());
-      hideUsersFromFeed.add(request.toUserId.toString());
+      if (request.fromUserId) hideUsersFromFeed.add(request.fromUserId.toString());
+      if (request.toUserId) hideUsersFromFeed.add(request.toUserId.toString());
     });
 
     const users = await User.find({
@@ -109,13 +103,15 @@ usersRouter.get("/feed", userAuth, async (req, res) => {
         { _id: { $ne: loggedInUser._id } },
       ],
     })
-      .select("firstName lastName age photoUrl about skills githubUrl linkedInUrl portfolioUrl lookingFor")
+      .select(publicProjection.join(" "))
       .skip(skip)
-      .limit(limit);
+      .limit(limit)
+      .lean();
 
-    res.send(users);
+    return res.json(users);
+
   } catch (error) {
-    res.status(500).send("Error fetching feed");
+    return res.status(500).json({ message: "Error fetching feed" });
   }
 });
 

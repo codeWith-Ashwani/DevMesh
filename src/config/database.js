@@ -1,11 +1,39 @@
 const mongoose = require("mongoose");
+const env = require("./env");
+
+let listenersAttached = false;
+
+const attachConnectionListeners = () => {
+  if (listenersAttached) return;
+  listenersAttached = true;
+
+  mongoose.connection.on("connected", () => {
+    if (!env.isTest) {
+      console.log("MongoDB connection established successfully.");
+    }
+  });
+
+  mongoose.connection.on("error", (err) => {
+    console.error("MongoDB connection error:", err.message || "Database connection error");
+  });
+
+  mongoose.connection.on("disconnected", () => {
+    if (!env.isTest) {
+      console.warn("MongoDB connection disconnected.");
+    }
+  });
+
+  mongoose.connection.on("reconnected", () => {
+    if (!env.isTest) {
+      console.log("MongoDB connection re-established.");
+    }
+  });
+};
 
 const connectDB = async () => {
-  return mongoose.connect(
-    process.env.DB_CONNECTION_STRING ||
-      "mongodb+srv://work639280_db_user:La5udQvtNc1NELTr@cluster0.83xtjwl.mongodb.net/?appName=Cluster0"
-  );
+  attachConnectionListeners();
+  const connectionString = env.getDBConnectionString();
+  return mongoose.connect(connectionString);
 };
 
 module.exports = connectDB;
-
