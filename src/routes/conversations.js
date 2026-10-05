@@ -7,10 +7,18 @@ router.use('/conversations', (req, res, next) => {
   require('../services/throttle').throttle(`conversations:${req.method}:${req.user._id}`, req.method === 'GET' ? 300 : 30).then(() => next()).catch(e => res.status(e.status || 503).json({ message: e.message }));
 });
 router.get('/conversations', endpoint(async (req, res) => res.json(await chat.list(req.user._id, req.query.before))));
-router.post('/conversations/direct', endpoint(async (req, res) => res.json({ data: await chat.openDirect(req.user._id, req.body.userId) })));
-router.post('/conversations/group', endpoint(async (req, res) => res.status(201).json({ data: await chat.createGroup(req.user._id, req.body) })));
-router.post('/conversations/project/:projectId', endpoint(async (req, res) => res.json({ data: await chat.openProject(req.user._id, req.params.projectId) })));
-router.post('/conversations/trial/:trialId', endpoint(async (req, res) => res.json({ data: await chat.openTrial(req.user._id, req.params.trialId) })));
+async function opened(req, res, operation, status = 200) {
+  const conversation = await operation;
+  const members = conversation.kind === 'project'
+    ? (await chat.access(req.user._id, String(conversation._id))).members
+    : conversation.members.map(String);
+  req.app.get('io')?.to(members.map(member => `user:${member}`)).emit('conversation:updated', { conversationId: String(conversation._id) });
+  res.status(status).json({ data: conversation });
+}
+router.post('/conversations/direct', endpoint((req, res) => opened(req, res, chat.openDirect(req.user._id, req.body.userId))));
+router.post('/conversations/group', endpoint((req, res) => opened(req, res, chat.createGroup(req.user._id, req.body), 201)));
+router.post('/conversations/project/:projectId', endpoint((req, res) => opened(req, res, chat.openProject(req.user._id, req.params.projectId))));
+router.post('/conversations/trial/:trialId', endpoint((req, res) => opened(req, res, chat.openTrial(req.user._id, req.params.trialId))));
 router.get('/conversations/:conversationId', endpoint(async (req, res) => res.json({ data: await chat.detail(req.user._id, req.params.conversationId) })));
 router.get('/conversations/:conversationId/messages', endpoint(async (req, res) => res.json(await chat.history(req.user._id, req.params.conversationId, req.query.before, req.query.limit, req.query.after))));
 router.get('/conversations/:conversationId/receipts', endpoint(async (req, res) => {
@@ -36,6 +44,10 @@ router.patch('/conversations/:conversationId/members', endpoint(async (req, res)
   if (req.body.action === 'add') filter.$expr = { $lt: [{ $size: '$members' }, 50] };
   const data = await Conversation.findOneAndUpdate(filter, update, { returnDocument: 'after' });
   if (!data) fail(409, 'Group member limit reached');
+  const io = req.app.get('io');
+  io?.to(data.members.map(member => `user:${member}`)).emit('conversation:updated', { conversationId: String(data._id) });
+  if (req.body.action === 'remove' && conversation.members.includes(member))
+    io?.to(`user:${member}`).emit('conversation:removed', { conversationId: String(data._id) });
   res.json({ data });
 }));
 module.exports = router;

@@ -20,9 +20,9 @@ Connection-request creation now checks recipient existence and duplicate request
 
 ## Frontend loading
 
-Route-level lazy imports reduce the initial JavaScript from about 481.64 kB (148.97 kB gzip) to 341.86 kB (111.98 kB gzip). The chat client and network graph are downloaded with their routes. Shared navigation remains visible during route chunk loading.
+Route-level lazy imports reduce the initial JavaScript from about 481.64 kB (148.97 kB gzip) to 343.78 kB (112.67 kB gzip) after the chat reliability release. The Socket.IO library downloads after authentication and is reused across workspace pages; the chat page and network graph download with their routes. Shared navigation remains visible during route chunk loading.
 
-Dashboard and collaboration sections publish each response independently. Connections render when the people request completes, while project graph enrichment continues. Chat fetches its inbox once per route mount, loads the active room independently, and serializes reconnect replay using the last HTTP cursor so live events cannot skip missed history. Web fonts no longer block initial rendering. Browser tests hold the font and data requests open to verify useful content renders before they complete.
+Dashboard and collaboration sections publish each response independently. Connections render when the people request completes, while project graph enrichment continues. Chat loads the active room independently, refreshes its inbox on socket connection/reconnection, and serializes replay using the last HTTP cursor so live events cannot skip missed history. One session socket persists across workspace navigation. Web fonts no longer block initial rendering. Browser tests hold the font and data requests open to verify useful content renders before they complete.
 
 ## Deployment and remaining latency
 

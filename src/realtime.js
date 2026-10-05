@@ -31,7 +31,12 @@ async function attachRealtime(server, redis) {
   }
   io.use(async (socket, next) => {
     try { socket.data = await authenticate(socket); await throttle(`handshake:${socket.data.userId}`, 30); next(); }
-    catch { next(new Error('Authentication required')); }
+    catch (error) {
+      const status = [429, 503].includes(error.status) ? error.status : 401;
+      const failure = new Error(status === 401 ? 'Authentication required' : error.message);
+      failure.data = { status };
+      next(failure);
+    }
   });
   io.on('connection', socket => {
     socket.join(`user:${socket.data.userId}`);

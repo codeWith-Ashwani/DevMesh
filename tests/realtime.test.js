@@ -25,8 +25,23 @@ describe('Authenticated real-time personal and group chat', () => {
   it('rejects missing cookies and hostile origins', async () => {
     for (const headers of [{ Origin: 'http://localhost:5173' }, { Cookie: a.cookie, Origin: 'https://attacker.example' }]) {
       const s = io(base, { transports: ['websocket'], extraHeaders: headers, reconnection: false }); sockets.push(s);
-      await once(s, 'connect_error'); s.disconnect();
+      const [error] = await once(s, 'connect_error');
+      if (!headers.Cookie) assert.equal(error.data.status, 401);
+      s.disconnect();
     }
+  });
+  it('notifies invited members about new groups and removes departed memberships live', async () => {
+    const sb = await socket(b);
+    const invited = once(sb, 'conversation:updated');
+    const response = await request('POST', '/conversations/group', { name: 'Live membership', members: [b._id] }, a.cookie);
+    assert.equal(response.status, 201);
+    const conversationId = response.data.data._id;
+    assert.equal((await invited)[0].conversationId, conversationId);
+    assert.equal((await request('GET', `/conversations/${conversationId}`, null, outsider.cookie)).status, 403);
+    const removed = once(sb, 'conversation:removed');
+    assert.equal((await request('PATCH', `/conversations/${conversationId}/members`, { action: 'remove', userId: b._id }, a.cookie)).status, 200);
+    assert.equal((await removed)[0].conversationId, conversationId);
+    assert.equal((await request('GET', `/conversations/${conversationId}`, null, b.cookie)).status, 403);
   });
   it('delivers persisted personal messages and handles concurrent retries once', async () => {
     const sa = await socket(a), sb = await socket(b);

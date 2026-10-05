@@ -2,6 +2,8 @@
 process.env.NODE_ENV = 'test';
 process.env.JWT_SECRET = 'browser_test_secret_only_123456789';
 process.env.CLIENT_URL = 'http://localhost:5173';
+// Browser scenarios use multiple authenticated contexts; production limits stay unchanged.
+process.env.RATE_LIMIT_LOGIN_MAX = '50';
 delete process.env.REDIS_URL;
 const mongoose = require('mongoose');
 const { MongoMemoryServer } = require('mongodb-memory-server');

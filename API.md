@@ -24,6 +24,10 @@ Connect with credentials and WebSocket transport. Cookie identity is server-deri
 - conversation:typing `{conversationId}`; server broadcasts the conversation and authenticated user ID.
 - conversation:read `{conversationId,messageId}`; server verifies the message belongs to the conversation, stores a monotonic watermark and broadcasts it.
 
+Server notifications `conversation:updated {conversationId}` announce opened conversations and group membership changes to their current members. Fetch `GET /conversations/:id` to obtain authorized metadata. `conversation:removed {conversationId}` tells a departed group member to remove that conversation from their UI. The notification itself does not grant access. Reconnects should reload the inbox and replay durable message history, since notifications are not persisted.
+
+Handshake failures include `connect_error.data.status`: 401 for authentication failure, 429 for the connection limit, or 503 for a temporarily unavailable shared limiter. Clients must not treat an authentication failure as an endless automatic reconnect; offer sign-in recovery. Reuse one authenticated socket across page/conversation navigation, and disconnect on sign-out.
+
 ## Collaboration
 
 - GET/PUT /collaboration/profile: `{hoursPerWeek:1..40,durationWeeks:1..52,goal,roles:[string]}`. PUT renews availability for 30 days. Goals: Learn together; Ship a portfolio project; Contribute to open source; Launch a product.
