@@ -10,5 +10,6 @@ const schema = new mongoose.Schema({
   trial: { type: mongoose.Schema.Types.ObjectId, ref: 'Trial' },
 }, { timestamps: true });
 schema.index({ key: 1 }, { unique: true, partialFilterExpression: { key: { $type: 'string' } } });
-schema.index({ members: 1, updatedAt: -1 });
+schema.index({ members: 1, _id: -1 });
+schema.index({ project: 1, _id: -1 });
 module.exports = mongoose.model('Conversation', schema);

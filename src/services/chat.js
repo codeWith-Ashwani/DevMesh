@@ -4,6 +4,9 @@ const LegacyMessage = require('../models/message');
 const Connection = require('../models/conectionRequest');
 const Project = require('../models/project');
 const User = require('../models/user');
+const Trial = require('../models/trial');
+const ReadReceipt = require('../models/readReceipt');
+const { Types } = require('mongoose');
 const { fail, id, text } = require('../utils/domain');
 
 async function connected(a, b) {
@@ -12,21 +15,31 @@ async function connected(a, b) {
 function projectMembers(project) {
   return [...new Set([String(project.creator), ...project.applications.filter(a => a.status === 'accepted').map(a => String(a.user))])];
 }
+// Both single-room access and the batched inbox use current project/trial membership.
+function currentMembers(conversation, project, trial, trialProjectExists) {
+  if (conversation.kind === 'trial') {
+    if (!trial || !['active', 'completed'].includes(trial.status) || !trialProjectExists) fail(403, 'Trial chat is unavailable');
+    return [String(trial.owner), String(trial.participant)];
+  }
+  if (conversation.kind === 'project') {
+    if (!project) fail(404, 'Project not found');
+    return projectMembers(project);
+  }
+  return conversation.members.map(String);
+}
 async function access(userId, conversationId) {
   id(conversationId);
   const conversation = await Conversation.findById(conversationId).lean();
   if (!conversation) fail(404, 'Conversation not found');
-  let members = conversation.members.map(String);
+  let project, trial, trialProjectExists;
   if (conversation.kind === 'trial') {
-    const trial = await require('../models/trial').findById(conversation.trial).lean();
-    if (!trial || !['active', 'completed'].includes(trial.status) || !await Project.exists({ _id: trial.project })) fail(403, 'Trial chat is unavailable');
-    members = [String(trial.owner), String(trial.participant)];
+    trial = await Trial.findById(conversation.trial).lean();
+    trialProjectExists = trial && await Project.exists({ _id: trial.project });
   }
   if (conversation.kind === 'project') {
-    const project = await Project.findById(conversation.project).lean();
-    if (!project) fail(404, 'Project not found');
-    members = projectMembers(project);
+    project = await Project.findById(conversation.project).lean();
   }
+  const members = currentMembers(conversation, project, trial, trialProjectExists);
   if (!members.includes(String(userId))) fail(403, 'Conversation access denied');
   if (conversation.kind === 'direct' && !await connected(members[0], members[1])) fail(403, 'An accepted connection is required');
   return { ...conversation, members };
@@ -102,16 +115,67 @@ async function list(userId, before) {
   const hasMore = rows.length > 30;
   if (hasMore) rows.pop();
   const data = [];
+  const trialIds = rows.filter(r => r.kind === 'trial').map(r => r.trial);
+  const directRows = rows.filter(r => r.kind === 'direct');
+  const [trials, connections] = await Promise.all([
+    trialIds.length ? Trial.find({ _id: { $in: trialIds } }).select('owner participant status project').lean() : [],
+    directRows.length ? Connection.find({ status: 'accepted', $or: directRows.flatMap(r => [
+      { fromUserId: r.members[0], toUserId: r.members[1] },
+      { fromUserId: r.members[1], toUserId: r.members[0] },
+    ]) }).select('fromUserId toUserId').lean() : [],
+  ]);
+  const projectIds = [...new Set([
+    ...rows.filter(r => r.kind === 'project').map(r => String(r.project)),
+    ...trials.map(t => String(t.project)),
+  ])];
+  const projectRows = projectIds.length ? await Project.find({ _id: { $in: projectIds } }).select('creator applications.user applications.status').lean() : [];
+  const projectMap = new Map(projectRows.map(p => [String(p._id), p]));
+  const trialMap = new Map(trials.map(t => [String(t._id), t]));
+  const pairKey = (a, b) => [String(a), String(b)].sort().join(':');
+  const acceptedPairs = new Set(connections.map(c => pairKey(c.fromUserId, c.toUserId)));
+  const authorizedRows = [];
   for (const row of rows) {
     try {
-      const authorized = await access(userId, String(row._id));
-      const members = await User.find({ _id: { $in: authorized.members } }).select('firstName lastName photoUrl').lean();
-      const receipt = await require('../models/readReceipt').findOne({ conversation: row._id, user: userId }).lean();
-      const filter = { conversation: row._id, sender: { $ne: userId } };
-      if (receipt) filter._id = { $gt: receipt.message };
-      const [unreadCount, lastMessage] = await Promise.all([ChatMessage.countDocuments(filter), ChatMessage.findOne({ conversation: row._id }).sort({ _id: -1 }).select('text createdAt').lean()]);
-      data.push({ ...row, members, unreadCount, lastMessage });
+      const trial = trialMap.get(String(row.trial));
+      const members = currentMembers(row, projectMap.get(String(row.project)), trial, trial && projectMap.has(String(trial.project)));
+      if (!members.includes(String(userId))) continue;
+      if (row.kind === 'direct' && !acceptedPairs.has(pairKey(members[0], members[1]))) continue;
+      authorizedRows.push({ ...row, members });
     } catch (e) { if (![403, 404].includes(e.status)) throw e; }
+  }
+  if (authorizedRows.length) {
+    const memberIds = [...new Set(authorizedRows.flatMap(r => r.members))];
+    const viewer = new Types.ObjectId(String(userId));
+    // Indexed lookups run inside MongoDB instead of five network round trips per room.
+    const [users, summaries] = await Promise.all([
+      User.find({ _id: { $in: memberIds } }).select('firstName lastName photoUrl').lean(),
+      Conversation.aggregate([
+        { $match: { _id: { $in: authorizedRows.map(r => r._id) } } },
+        { $lookup: { from: ReadReceipt.collection.name, let: { room: '$_id' }, pipeline: [
+          { $match: { user: viewer, $expr: { $eq: ['$conversation', '$$room'] } } },
+          { $project: { message: 1 } },
+        ], as: 'receipt' } },
+        { $lookup: { from: ChatMessage.collection.name, let: { room: '$_id' }, pipeline: [
+          { $match: { $expr: { $eq: ['$conversation', '$$room'] } } },
+          { $sort: { _id: -1 } }, { $limit: 1 }, { $project: { text: 1, createdAt: 1 } },
+        ], as: 'latest' } },
+        { $lookup: { from: ChatMessage.collection.name, let: {
+          room: '$_id', readThrough: { $ifNull: [{ $arrayElemAt: ['$receipt.message', 0] }, new Types.ObjectId('000000000000000000000000')] },
+        }, pipeline: [
+          { $match: { sender: { $ne: viewer }, $expr: { $and: [
+            { $eq: ['$conversation', '$$room'] }, { $gt: ['$_id', '$$readThrough'] },
+          ] } } }, { $count: 'count' },
+        ], as: 'unread' } },
+        { $project: { lastMessage: { $ifNull: [{ $arrayElemAt: ['$latest', 0] }, null] }, unreadCount: { $ifNull: [{ $arrayElemAt: ['$unread.count', 0] }, 0] } } },
+      ]),
+    ]);
+    const userMap = new Map(users.map(u => [String(u._id), u]));
+    const summaryMap = new Map(summaries.map(s => [String(s._id), s]));
+    for (const row of authorizedRows) {
+      const summary = summaryMap.get(String(row._id));
+      // A concurrently deleted room must not reappear with stale metadata.
+      if (summary) data.push({ ...row, members: row.members.map(m => userMap.get(m)).filter(Boolean), unreadCount: summary.unreadCount, lastMessage: summary.lastMessage });
+    }
   }
   return { data, hasMore, before: rows.at(-1)?._id || null };
 }

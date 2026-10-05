@@ -11,7 +11,8 @@
     "seed:ash-project": "node scripts/seedAshProject.js",
     "test": "node --test --test-concurrency=1 --experimental-test-coverage tests/*.test.js",
     "test:security": "node scripts/verifySecurity.js",
-    "benchmark": "node scripts/benchmark.js"
+    "benchmark": "node scripts/benchmark.js",
+    "benchmark:inbox": "node scripts/benchmarkInbox.js"
   },
   "keywords": [
     "nodejs",

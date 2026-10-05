@@ -30,6 +30,8 @@ Browser tests live in the frontend repository and launch `scripts/startBrowserTe
 
 `npm run benchmark` seeds 5,000 chat messages in an isolated database and measures 200 history-page requests at concurrency 10. Results are recorded in BENCHMARK_RESULTS.json with the environment and error count. This local microbenchmark is reproducible evidence, not a production capacity claim.
 
+`npm run benchmark:inbox` measures a 30-conversation inbox with 50 messages per room, including receipts and correctness checks. The inbox batches current membership checks and uses indexed MongoDB lookups for message summaries instead of issuing queries per conversation. See [performance measurements](PERFORMANCE.md) for the baseline, results and hosting checks.
+
 ## Interview walkthrough
 
 1. Publish a project with a first deliverable, roles, seats and commitment.

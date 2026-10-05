@@ -31,19 +31,20 @@ requestsRouter.post(
           .json({ message: "Cannot send connection request to yourself" });
       }
 
-      const toUser = await User.findById(toUserId);
+      const [toUser, existingRequest] = await Promise.all([
+        User.findById(toUserId).select('_id').lean(),
+        ConnectionRequestModel.exists({
+          $or: [
+            { fromUserId, toUserId },
+            { fromUserId: toUserId, toUserId: fromUserId },
+          ],
+        }),
+      ]);
       if (!toUser) {
         return res.status(404).json({ message: "Recipient user not found" });
       }
 
       // if a request already exists between these users, do not create a new one
-      const existingRequest = await ConnectionRequestModel.findOne({
-        $or: [
-          { fromUserId, toUserId },
-          { fromUserId: toUserId, toUserId: fromUserId },
-        ],
-      });
-
       if (existingRequest) {
         return res
           .status(400)
