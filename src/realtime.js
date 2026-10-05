@@ -65,7 +65,9 @@ async function attachRealtime(server, redis) {
       const message = await Message.findOne({ _id: id(input.messageId), conversation: conversation._id }).lean();
       if (!message) fail(404, 'Message not found');
       const Receipt = require('./models/readReceipt');
-      await Receipt.updateOne({ conversation: conversation._id, user: socket.data.userId }, { $max: { message: message._id } }, { upsert: true });
+      const filter = { conversation: conversation._id, user: socket.data.userId };
+      try { await Receipt.updateOne(filter, { $max: { message: message._id } }, { upsert: true }); }
+      catch(e) { if (e.code !== 11000) throw e; await Receipt.updateOne(filter, { $max: { message: message._id } }); }
       io.to(conversation.members.map(m => `user:${m}`)).emit('conversation:read', { conversationId: input.conversationId, userId: socket.data.userId, messageId: String(message._id) });
       return {};
     });

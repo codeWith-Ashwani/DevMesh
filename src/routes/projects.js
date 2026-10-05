@@ -97,6 +97,7 @@ projectsRouter.get("/projects", userAuth, async (req, res) => {
     const data = projects.map(({ applications, ...project }) => ({
       ...project,
       applicationsCount: applications ? applications.length : 0,
+      applicationStatus: applications.find(a => a.user.toString() === req.user._id.toString())?.status || null,
       hasApplied: applications ? applications.some((application) => application.user.toString() === req.user._id.toString()) : false,
       isTeamMember: project.creator._id.toString() === req.user._id.toString() || applications.some(a => a.status === 'accepted' && a.user.toString() === req.user._id.toString()),
       teamSize: 1 + applications.filter(a => a.status === 'accepted').length,

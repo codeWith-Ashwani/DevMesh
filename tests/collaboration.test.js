@@ -60,4 +60,23 @@ describe('Team formation and shipping workflow', () => {
     const response = await fetch(`${base}/logout`, { method: 'POST', headers: { Cookie: owner.cookie, Origin: 'https://attacker.example', 'Content-Type': 'application/json' }, body: '{}' });
     assert.equal(response.status, 403);
   });
+  it('does not overfill a role under concurrent owner reviews', async () => {
+    const created = await request('POST', '/projects', { title: 'One seat project', description: 'A project with one role seat to test concurrent reviews.', techStack: ['React'], rolesNeeded: ['Frontend'] }, owner.cookie);
+    const p = created.data.data;
+    await request('POST', `/projects/${p._id}/apply`, { role: 'Frontend' }, applicant.cookie);
+    await request('POST', `/projects/${p._id}/apply`, { role: 'Frontend' }, outsider.cookie);
+    const applications = (await request('GET', `/projects/${p._id}/applications`, null, owner.cookie)).data.data;
+    const results = await Promise.all(applications.map(a => request('PATCH', `/projects/${p._id}/applications/${a._id}`, { status: 'accepted' }, owner.cookie)));
+    assert.equal(results.filter(r => r.status === 200).length, 1);
+    assert.equal(results.filter(r => r.status === 409).length, 1);
+    const reviewed = (await request('GET', `/projects/${p._id}/applications`, null, owner.cookie)).data.data;
+    assert.equal(reviewed.filter(a => a.status === 'accepted').length, 1);
+  });
+  it('revokes project channel and workspace access when a team member leaves', async () => {
+    const channel = await request('POST', `/conversations/project/${project._id}`, {}, applicant.cookie);
+    assert.equal(channel.status, 200);
+    assert.equal((await request('DELETE', `/projects/${project._id}/team/${applicant._id}`, null, applicant.cookie)).status, 200);
+    assert.equal((await request('GET', `/projects/${project._id}/workspace`, null, applicant.cookie)).status, 403);
+    assert.equal((await request('GET', `/conversations/${channel.data.data._id}/messages`, null, applicant.cookie)).status, 403);
+  });
 });

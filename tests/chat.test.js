@@ -90,10 +90,10 @@ describe("Peer Chat & Real-Time Messaging", () => {
     assert.strictEqual(res1.status, 400);
     assert.strictEqual(res1.data.message, "A message cannot be empty");
 
-    // Oversized message (> 5000 chars)
-    const longText = "a".repeat(5001);
+    // API and model use the same 2000-character limit.
+    const longText = "a".repeat(2001);
     const res2 = await request("POST", `/chat/${userB._id}`, { text: longText }, userA.cookie);
     assert.strictEqual(res2.status, 400);
-    assert.strictEqual(res2.data.message, "Message cannot exceed 5000 characters");
+    assert.strictEqual(res2.data.message, "Message cannot exceed 2000 characters");
   });
 });

@@ -5,12 +5,13 @@
   "main": "index.js",
   "scripts": {
     "start": "node src/app.js",
-    "dev": "nodemon src/app.js",
+    "dev": "node --watch src/app.js",
     "seed:users": "node scripts/seedUsers.js",
     "seed:ash-network": "node scripts/seedAshNetwork.js",
     "seed:ash-project": "node scripts/seedAshProject.js",
     "test": "node --test --test-concurrency=1 --experimental-test-coverage tests/*.test.js",
-    "test:security": "node scripts/verifySecurity.js"
+    "test:security": "node scripts/verifySecurity.js",
+    "benchmark": "node scripts/benchmark.js"
   },
   "keywords": [
     "nodejs",

@@ -45,7 +45,7 @@ chatRouter.get("/chat/:userId", userAuth, async (req, res) => {
         { fromUserId: otherUserId, toUserId: req.user._id },
       ],
     })
-      .sort({ createdAt: -1 })
+      .sort({ createdAt: -1, _id: -1 })
       .skip(skip)
       .limit(limit)
       .select("fromUserId toUserId text createdAt")
@@ -71,8 +71,8 @@ chatRouter.post("/chat/:userId", userAuth, async (req, res) => {
       return res.status(400).json({ message: "A message cannot be empty" });
     }
 
-    if (text.length > 5000) {
-      return res.status(400).json({ message: "Message cannot exceed 5000 characters" });
+    if (text.length > 2000) {
+      return res.status(400).json({ message: "Message cannot exceed 2000 characters" });
     }
 
     const isConnected = await hasAcceptedConnection(req.user._id, otherUserId);
@@ -93,4 +93,3 @@ chatRouter.post("/chat/:userId", userAuth, async (req, res) => {
 });
 
 module.exports = chatRouter;
-

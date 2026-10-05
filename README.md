@@ -28,6 +28,8 @@ Run `npm start`. Alternatively, set JWT_SECRET and run `docker compose up --buil
 
 Browser tests live in the frontend repository and launch `scripts/startBrowserTestServer.js`, an ephemeral fixture using fake accounts. CI runs functional tests, dependency audit and a Docker build.
 
+`npm run benchmark` seeds 5,000 chat messages in an isolated database and measures 200 history-page requests at concurrency 10. Results are recorded in BENCHMARK_RESULTS.json with the environment and error count. This local microbenchmark is reproducible evidence, not a production capacity claim.
+
 ## Interview walkthrough
 
 1. Publish a project with a first deliverable, roles, seats and commitment.
