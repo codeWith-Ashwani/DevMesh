@@ -18,12 +18,6 @@ usersRouter.get("/user/requests/received", userAuth, async (req, res) => {
       .populate("fromUserId", publicProjection)
       .lean();
 
-    if (connectionRequests.length === 0) {
-      return res.status(404).json({
-        message: "No pending connection requests found",
-      });
-    }
-
     return res.status(200).json({
       message: "Connection requests fetched successfully",
       data: connectionRequests,
@@ -54,12 +48,6 @@ usersRouter.get("/user/connections", userAuth, async (req, res) => {
         return row.fromUserId;
       }
     });
-
-    if (connectionRequests.length === 0) {
-      return res.status(404).json({
-        message: "No connections found",
-      });
-    }
 
     return res.status(200).json({
       message: "Connections fetched successfully",

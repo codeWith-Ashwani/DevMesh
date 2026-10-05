@@ -25,6 +25,21 @@ describe("Connection Requests & Network Mesh", () => {
     await stopTestServer();
   });
 
+  it("returns successful empty collections for a developer with no network yet", async () => {
+    for (const path of ['/user/connections', '/user/requests/received']) {
+      const response = await request('GET', path, null, userC.cookie);
+      assert.strictEqual(response.status, 200);
+      assert.deepStrictEqual(response.data.data, []);
+    }
+  });
+
+  it("requires authentication even when network collections are empty", async () => {
+    for (const path of ['/user/connections', '/user/requests/received']) {
+      const response = await request('GET', path);
+      assert.strictEqual(response.status, 401);
+    }
+  });
+
   it("should allow a user to send a connection request to another user", async () => {
     const res = await request("POST", `/request/send/interested/${userB._id}`, {}, userA.cookie);
 

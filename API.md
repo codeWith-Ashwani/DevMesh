@@ -4,6 +4,8 @@ All routes require the signed `token` cookie. Browser writes must use CLIENT_URL
 
 ## Conversations
 
+Network collections `GET /user/connections` and `GET /user/requests/received` return HTTP 200 with `{data: []}` when the authenticated account has no records. Empty collections are normal states; missing routes still return 404 and unauthenticated requests return 401.
+
 - GET /conversations?before=ID: newest conversations, 30 at a time, with members, unreadCount and lastMessage.
 - GET /conversations/:id: authorized metadata and public member names.
 - POST /conversations/direct `{userId}`: open a unique personal conversation with an accepted connection.
