@@ -1,134 +1,58 @@
-const http = require("http");
-const mongoose = require("mongoose");
-const app = require("../../src/app");
-const connectDB = require("../../src/config/database");
-const User = require("../../src/models/user");
-const Project = require("../../src/models/project");
-const ConnectionRequest = require("../../src/models/conectionRequest");
-const Message = require("../../src/models/message");
-const {
-  loginLimiter,
-  signupLimiter,
-  passwordUpdateLimiter,
-} = require("../../src/middlewares/rateLimiter");
-
-let server = null;
-let baseUrl = "";
-
-process.env.NODE_ENV = "test";
-process.env.JWT_SECRET = process.env.JWT_SECRET || "test_suite_super_secret_jwt_key_987654321";
-process.env.CLIENT_URL = process.env.CLIENT_URL || "http://localhost:5173";
-process.env.DB_CONNECTION_STRING =
-  process.env.DB_CONNECTION_STRING || "mongodb+srv://work639280_db_user:La5udQvtNc1NELTr@cluster0.83xtjwl.mongodb.net/?appName=Cluster0";
-
-
-
-const startTestServer = async () => {
-  if (!server) {
-    await connectDB();
-    await mongoose.connection.asPromise();
-
-    server = http.createServer(app);
-    await new Promise((resolve) => server.listen(0, resolve));
-    const port = server.address().port;
-    baseUrl = `http://127.0.0.1:${port}`;
-  }
+process.env.NODE_ENV = 'test';
+process.env.JWT_SECRET = 'test_only_secret_987654321';
+process.env.CLIENT_URL = 'http://localhost:5173';
+const http = require('http');
+const mongoose = require('mongoose');
+const { MongoMemoryServer } = require('mongodb-memory-server');
+const app = require('../../src/app');
+const { attachRealtime } = require('../../src/realtime');
+const { loginLimiter, signupLimiter, passwordUpdateLimiter } = require('../../src/middlewares/rateLimiter');
+let server, memory, realtime, baseUrl;
+async function startTestServer() {
+  if (server) return baseUrl;
+  memory = await MongoMemoryServer.create({ binary: { version: '7.0.24', downloadDir: require('path').resolve('node_modules/.cache/devmesh-test-mongo') } });
+  process.env.DB_CONNECTION_STRING = memory.getUri('devmesh_test');
+  await mongoose.connect(process.env.DB_CONNECTION_STRING);
+  await Promise.all(Object.values(mongoose.models).map(model => model.init()));
+  server = http.createServer(app);
+  realtime = await attachRealtime(server);
+  app.set('io', realtime.io);
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  baseUrl = `http://127.0.0.1:${server.address().port}`;
   return baseUrl;
-};
-
-const stopTestServer = async () => {
-  if (server) {
-    await new Promise((resolve) => server.close(resolve));
-    server = null;
-  }
+}
+async function stopTestServer() {
+  if (realtime) await realtime.close();
+  server = null; realtime = null;
   await mongoose.disconnect();
-};
-
-const request = async (method, path, body = null, cookies = null) => {
-  if (!server) {
-    await startTestServer();
+  if (memory) await memory.stop();
+  memory = null;
+}
+async function request(method, path, body = null, cookies = null) {
+  if (!server) await startTestServer();
+  const headers = { 'Content-Type': 'application/json' };
+  if (cookies) headers.Cookie = cookies;
+  const response = await fetch(`${baseUrl}${path}`, { method, headers, body: body === null ? null : JSON.stringify(body) });
+  const raw = await response.text();
+  let data; try { data = JSON.parse(raw); } catch { data = raw; }
+  return { status: response.status, data, setCookie: response.headers.get('set-cookie'), headers: response.headers };
+}
+async function createTestUser(overrides = {}) {
+  const unique = `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+  const email = overrides.email || `test.${unique}@devmesh.example`;
+  const password = overrides.password || 'TestPassword#2026';
+  const result = await request('POST', '/signup', { firstName: 'Test', lastName: 'User', email, password, ...overrides });
+  return { _id: result.data?.data?._id, user: result.data?.data, email, password, cookie: result.setCookie?.split(';')[0], status: result.status };
+}
+function resetRateLimiters() { loginLimiter.reset(); signupLimiter.reset(); passwordUpdateLimiter.reset(); }
+async function cleanupTestData(emails = []) {
+  const User = require('../../src/models/user');
+  const users = await User.find({ email: { $in: emails } }).select('_id');
+  const ids = users.map(u => u._id);
+  const projects = await mongoose.model('Project').find({ creator: { $in: ids } }).select('_id');
+  for (const model of Object.values(mongoose.models)) {
+    await model.deleteMany({ $or: [{ user: { $in: ids } }, { owner: { $in: ids } }, { creator: { $in: ids } }, { sender: { $in: ids } }, { fromUserId: { $in: ids } }, { toUserId: { $in: ids } }, { project: { $in: projects.map(p => p._id) } }] });
   }
-
-  const url = `${baseUrl}${path}`;
-  const headers = {
-    "Content-Type": "application/json",
-  };
-  if (cookies) {
-    headers["Cookie"] = cookies;
-  }
-
-  const response = await fetch(url, {
-    method,
-    headers,
-    body: body ? JSON.stringify(body) : null,
-  });
-
-  const status = response.status;
-  const setCookie = response.headers.get("set-cookie");
-  let data = null;
-  const text = await response.text();
-  try {
-    data = JSON.parse(text);
-  } catch (e) {
-    data = text;
-  }
-
-  return { status, data, setCookie, headers: response.headers };
-};
-
-const createTestUser = async (overrides = {}) => {
-  const unique = `${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-  const defaultPassword = "TestPassword#2026";
-  const email = overrides.email || `test.${unique}@devmesh.example`.toLowerCase();
-  const firstName = overrides.firstName || "Test";
-  const lastName = overrides.lastName || "User";
-
-  const res = await request("POST", "/signup", {
-    firstName,
-    lastName,
-    email,
-    password: overrides.password || defaultPassword,
-    ...overrides,
-  });
-
-  const cookie = res.setCookie ? res.setCookie.split(";")[0] : null;
-  return {
-    _id: res.data?.data?._id,
-    user: res.data?.data,
-    email,
-    password: overrides.password || defaultPassword,
-    cookie,
-    status: res.status,
-  };
-};
-
-const resetRateLimiters = () => {
-  if (loginLimiter.reset) loginLimiter.reset();
-  if (signupLimiter.reset) signupLimiter.reset();
-  if (passwordUpdateLimiter.reset) passwordUpdateLimiter.reset();
-};
-
-const cleanupTestData = async (emails = []) => {
-  if (emails.length > 0) {
-    const users = await User.find({ email: { $in: emails } }).select("_id");
-    const userIds = users.map((u) => u._id);
-
-    await User.deleteMany({ _id: { $in: userIds } });
-    await Project.deleteMany({ creator: { $in: userIds } });
-    await ConnectionRequest.deleteMany({
-      $or: [{ fromUserId: { $in: userIds } }, { toUserId: { $in: userIds } }],
-    });
-    await Message.deleteMany({
-      $or: [{ fromUserId: { $in: userIds } }, { toUserId: { $in: userIds } }],
-    });
-  }
-};
-
-module.exports = {
-  startTestServer,
-  stopTestServer,
-  request,
-  createTestUser,
-  resetRateLimiters,
-  cleanupTestData,
-};
+  await User.deleteMany({ _id: { $in: ids } });
+}
+module.exports = { startTestServer, stopTestServer, request, createTestUser, resetRateLimiters, cleanupTestData };

@@ -13,6 +13,7 @@ const getJWTSecret = () => {
       "FATAL: JWT_SECRET environment variable is required. Please define it in your .env or environment configuration."
     );
   }
+  if (process.env.NODE_ENV === 'production' && secret.length < 32) throw new Error('FATAL: JWT_SECRET must contain at least 32 characters in production');
   return secret;
 };
 
@@ -40,7 +41,8 @@ const getClientURL = () => {
   if (isProd && (clientUrl.includes("localhost") || clientUrl.includes("127.0.0.1"))) {
     console.warn("WARNING: CLIENT_URL is pointing to localhost in production environment.");
   }
-  return clientUrl;
+  try { const url = new URL(clientUrl); if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.pathname !== '/' || url.search || url.hash) throw new Error(); return url.origin; }
+  catch { throw new Error('FATAL: CLIENT_URL must be an HTTP(S) origin without a path'); }
 };
 
 const config = {

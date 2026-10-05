@@ -9,7 +9,7 @@
     "seed:users": "node scripts/seedUsers.js",
     "seed:ash-network": "node scripts/seedAshNetwork.js",
     "seed:ash-project": "node scripts/seedAshProject.js",
-    "test": "node --test --experimental-test-coverage tests/**/*.test.js",
+    "test": "node --test --test-concurrency=1 --experimental-test-coverage tests/*.test.js",
     "test:security": "node scripts/verifySecurity.js"
   },
   "keywords": [
@@ -19,16 +19,23 @@
   "author": "Ashwani Singh",
   "license": "ISC",
   "dependencies": {
+    "@socket.io/redis-adapter": "^8.3.0",
     "bcrypt": "^6.0.0",
+    "cookie": "^2.0.1",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
     "express": "^5.1.0",
+    "ioredis": "^6.0.0",
     "jsonwebtoken": "^9.0.2",
     "mongoose": "^9.0.0",
+    "socket.io": "^4.8.4",
     "validator": "^13.15.23"
   },
   "engines": {
     "node": ">=22.0.0"
+  },
+  "devDependencies": {
+    "mongodb-memory-server": "^11.3.0",
+    "socket.io-client": "^4.8.4"
   }
 }
-

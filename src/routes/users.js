@@ -104,6 +104,7 @@ usersRouter.get("/feed", userAuth, async (req, res) => {
       ],
     })
       .select(publicProjection.join(" "))
+      .sort({ _id: -1 })
       .skip(skip)
       .limit(limit)
       .lean();

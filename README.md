@@ -1,90 +1,42 @@
-# DevMesh Backend API
+# DevMesh — find your team and ship together
 
-DevMesh is a developer networking and project collaboration platform.
+DevMesh helps developers find compatible collaborators, try a small milestone, form a project team and document shipped work. GitHub remains the home for code, pull requests and issues.
 
-## Architecture Overview
-- **Runtime**: Node.js 22+ (Native test runner, fetch, crypto)
-- **Framework**: Express 5
-- **Database**: MongoDB with Mongoose ODM
-- **Authentication**: JWT stored in secure, HttpOnly, SameSite cookies
-- **Security**: Strict CORS whitelisting, HTTP security headers (`nosniff`, `DENY`, `HSTS`), sliding-window rate limiting, and centralized JSON error handling.
+## Implemented workflows
 
----
+- Developer profiles and connection requests.
+- Role-specific project applications, seat limits and owner-only reviews.
+- Availability that expires after 30 days; explainable matching by skills, time, duration, roles and goals.
+- Voluntary collaboration trials with invitations, short deadlines and mutual continuation decisions.
+- Team workspaces with assigned milestones, completion evidence, check-ins and project showcases.
+- Socket.IO personal, custom-group, project-team and trial conversations; durable history, read watermarks, typing and retry deduplication.
+- Optional Redis cross-instance broadcasts and shared authentication/message limits.
 
-## Local Setup
+## Stack and architecture
 
-### 1. Environment Configuration
-Copy the sample environment file to `.env`:
-```bash
-cp .env.example .env
-```
+React/Vite client → Express HTTP + Socket.IO API → MongoDB. Redis distributes live events; MongoDB stores durable messages. Cookie authentication and per-event membership checks protect conversations. See [API contracts](API.md), [deployment runbook](DEPLOYMENT.md), and [implementation plan](IMPLEMENTATION_PLAN.md).
 
-Fill in the required environment variables:
-```ini
-NODE_ENV=development
-PORT=7777
-JWT_SECRET=your_local_development_jwt_secret_key_here
-DB_CONNECTION_STRING=mongodb+srv://<username>:<password>@<cluster>.mongodb.net/devMesh
-CLIENT_URL=http://localhost:5173
-```
+## Local setup
 
-> **IMPORTANT**: Never commit `.env` or real credentials to git.
+Use Node 22+. Run `npm ci`. Copy `.env.example` to `.env`, set JWT_SECRET and DB_CONNECTION_STRING, and leave CLIENT_URL at http://localhost:5173 for local development. REDIS_URL is optional for one server.
 
-### 2. Install Dependencies
-```bash
-npm install
-```
+Run `npm start`. Alternatively, set JWT_SECRET and run `docker compose up --build` for the local API/MongoDB/Redis stack. The compose stack is for development and exposes only the API on localhost. Start the [frontend](https://github.com/codeWith-Ashwani/DevMesh-Web) separately.
 
-### 3. Run Development Server
-```bash
-npm run dev
-```
+## Verification
 
-### 4. Run Production Server
-```bash
-npm start
-```
+`npm test` runs isolated MongoDB tests; it never uses your configured live database. The first run downloads MongoDB 7.0.24 into an ignored dependency cache. Set REDIS_TEST_URL to an isolated Redis service to include cross-instance tests. `npm run test:security` runs the security-focused subset against an isolated database.
 
----
+Browser tests live in the frontend repository and launch `scripts/startBrowserTestServer.js`, an ephemeral fixture using fake accounts. CI runs functional tests, dependency audit and a Docker build.
 
-## Testing & Quality Assurance
+## Interview walkthrough
 
-### Run Unit & Integration Tests (with Coverage)
-```bash
-npm test
-```
+1. Publish a project with a first deliverable, roles, seats and commitment.
+2. Set a collaborator's availability and explain the matching reasons.
+3. Apply to a role; invite the applicant to a short trial and communicate in trial chat.
+4. Record both trial decisions, then accept the application to form the team.
+5. Open team group chat, assign a milestone, post a check-in and link contribution evidence.
+6. Publish the shipped demo and outcome.
 
-### Run Dedicated AppSec & Security Regression Suite
-```bash
-npm run test:security
-```
+## Practical limits
 
----
-
-## Docker Containerization
-
-### Build Docker Image
-```bash
-docker build -t devmesh-backend .
-```
-
-### Run Docker Container
-```bash
-docker run -d \
-  --name devmesh-backend \
-  -p 7777:7777 \
-  -e NODE_ENV=production \
-  -e JWT_SECRET="your_production_jwt_secret" \
-  -e DB_CONNECTION_STRING="your_mongodb_atlas_connection_string" \
-  -e CLIENT_URL="https://your-frontend-domain.com" \
-  devmesh-backend
-```
-
----
-
-## Production Deployment & Secrets
-
-- **Cloud Secrets**: `JWT_SECRET`, `DB_CONNECTION_STRING`, and `CLIENT_URL` must be injected via the cloud provider's environment/secrets manager (e.g. Render, Railway, GCP Cloud Run, AWS Secrets Manager) and never committed to version control.
-- **Health Probes**:
-  - Liveness: `GET /health` (Returns HTTP 200 `{ "status": "ok" }`)
-  - Readiness: `GET /ready` (Returns HTTP 200 when MongoDB is connected, HTTP 503 when disconnected)
+Scores are preference fit, not verified ability. Applications are embedded and capped at 200/project. Discovery ranks batches, not the entire database. Live delivery is best-effort with durable replay. See the runbook for compatibility, view limits, cookie/proxy requirements and release checks. Production readiness requires verifying the actual hosting environment and representative load; this repository does not claim measured production capacity.

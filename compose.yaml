@@ -1,0 +1,37 @@
+services:
+  api:
+    build: .
+    ports:
+      - "127.0.0.1:7777:7777"
+    environment:
+      NODE_ENV: development
+      PORT: 7777
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env}
+      CLIENT_URL: http://localhost:5173
+      DB_CONNECTION_STRING: mongodb://mongo:27017/devmesh
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+  mongo:
+    image: mongo:7.0
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+  redis:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+volumes:
+  mongo-data:

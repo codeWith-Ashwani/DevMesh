@@ -20,14 +20,17 @@ const createRateLimiter = (options = {}) => {
     interval.unref();
   }
 
-  const rateLimiter = (req, res, next) => {
+  const rateLimiter = async (req, res, next) => {
     const ip =
-      req.headers["x-forwarded-for"]?.split(",")[0]?.trim() ||
       req.ip ||
       req.socket?.remoteAddress ||
       "unknown";
 
     const key = `${req.baseUrl || ""}${req.path}:${ip}`;
+    if (require('../config/redis').getRedis()) {
+      try { await require('../services/throttle').throttle(`http:${key}`, max, windowMs); return next(); }
+      catch (error) { res.setHeader('Retry-After', Math.ceil(windowMs / 1000)); return res.status(error.status || 503).json({ message: error.status === 429 ? message : 'Authentication temporarily unavailable' }); }
+    }
     const now = Date.now();
 
     let record = hits.get(key);

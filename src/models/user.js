@@ -4,6 +4,7 @@ const jwt = require("jsonwebtoken");
 
 const userSchema = new mongoose.Schema(
   {
+    authVersion: { type: Number, default: 0 },
     firstName: {
       type: String,
       required: true,
@@ -126,7 +127,7 @@ userSchema.set("toObject", {
 
 userSchema.methods.getJWT = function () {
   const user = this;
-  const token = jwt.sign({ _id: user._id }, getJWTSecret(), {
+  const token = jwt.sign({ _id: user._id, version: user.authVersion || 0 }, getJWTSecret(), {
     expiresIn: "1d",
   });
   return token;

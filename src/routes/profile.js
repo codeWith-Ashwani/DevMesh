@@ -66,7 +66,11 @@ const handlePasswordUpdate = async (req, res) => {
     const hashedPassword = await bcrypt.hash(newPassword, 10);
 
     user.password = hashedPassword;
+    user.authVersion = (user.authVersion || 0) + 1;
     await user.save();
+    req.app.get('io')?.in(`user:${user._id}`).disconnectSockets(true);
+    const { getCookieOptions } = require('../utils/security');
+    res.cookie('token', user.getJWT(), getCookieOptions());
 
     return res.json({ message: "Password updated successfully" });
   } catch (error) {

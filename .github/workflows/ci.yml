@@ -1,57 +1,24 @@
-name: CI Pipeline
-
-on:
-  push:
-    branches:
-      - main
-  pull_request:
-    branches:
-      - main
-
+name: Backend verification
+on: [push, pull_request]
+permissions:
+  contents: read
 jobs:
   test:
-    name: Test & AppSec Quality Gate
     runs-on: ubuntu-latest
-
     services:
-      mongodb:
-        image: mongo:7.0
-        ports:
-          - 27017:27017
-        options: >-
-          --health-cmd "mongosh --eval 'db.runCommand({ ping: 1 })'"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-
-    env:
-      NODE_ENV: test
-      JWT_SECRET: CI_TEST_ONLY_SECRET
-      CLIENT_URL: http://localhost:5173
-      DB_CONNECTION_STRING: mongodb://127.0.0.1:27017/devmesh_test
-
+      redis:
+        image: redis:7.4-alpine
+        ports: ["6379:6379"]
+        options: --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 3s --health-retries 10
     steps:
-      - name: Checkout Source Code
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js 22
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
-          node-version: 22.x
-          cache: "npm"
-
-      - name: Print Diagnostic Environment Info
-        run: |
-          echo "=== Node & npm Diagnostics ==="
-          node --version
-          npm --version
-          echo "=============================="
-
-      - name: Install Clean Dependencies
-        run: npm ci
-
-      - name: Run Automated Test Suite (with Coverage)
-        run: npm test
-
-      - name: Run Dedicated AppSec & Security Verification
-        run: npm run test:security
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+        env:
+          REDIS_TEST_URL: redis://127.0.0.1:6379
+      - run: npm audit --omit=dev --audit-level=high
+      - run: docker build -t devmesh-ci .

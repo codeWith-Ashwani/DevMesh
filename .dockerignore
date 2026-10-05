@@ -1,13 +1,7 @@
 node_modules
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
+.git
 .env
 .env.*
-.git
-.github
-tests
-coverage
 *.log
-.DS_Store
-scripts
+coverage
+tests

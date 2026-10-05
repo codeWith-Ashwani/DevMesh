@@ -10,7 +10,8 @@ const allowedCommitments = ["Flexible", "5 hrs/week", "10 hrs/week", "20+ hrs/we
 
 projectsRouter.post("/projects", userAuth, async (req, res) => {
   try {
-    const { title, description, techStack, rolesNeeded, stage, commitment, githubUrl } = req.body;
+    const { title, description, techStack, rolesNeeded, stage, commitment, githubUrl, firstDeliverable = '', durationWeeks = 4, roleOpenings } = req.body;
+    if (typeof firstDeliverable !== 'string' || firstDeliverable.length > 500 || !Number.isInteger(durationWeeks) || durationWeeks < 1 || durationWeeks > 52) return res.status(400).json({ message: 'Invalid deliverable or duration' });
 
     if (!title || typeof title !== "string" || title.trim().length < 3 || title.trim().length > 100) {
       return res.status(400).json({ message: "Title must be between 3 and 100 characters" });
@@ -37,6 +38,8 @@ projectsRouter.post("/projects", userAuth, async (req, res) => {
         return res.status(400).json({ message: "Each role must be a non-empty string up to 50 characters" });
       }
     }
+    const openings = roleOpenings || rolesNeeded.map(title => ({ title, seats: 1 }));
+    if (!Array.isArray(openings) || openings.length !== rolesNeeded.length || new Set(rolesNeeded.map(r => r.trim().toLowerCase())).size !== rolesNeeded.length || openings.some((o, i) => !o || o.title !== rolesNeeded[i] || !Number.isInteger(o.seats) || o.seats < 1 || o.seats > 10)) return res.status(400).json({ message: 'Provide unique roles with 1-10 seats each' });
 
     if (stage && !allowedStages.includes(stage)) {
       return res.status(400).json({ message: "Invalid project stage" });
@@ -57,6 +60,10 @@ projectsRouter.post("/projects", userAuth, async (req, res) => {
       description: description.trim(),
       techStack: techStack.map((s) => s.trim()),
       rolesNeeded: rolesNeeded.map((r) => r.trim()),
+      roleOpenings: openings,
+      firstDeliverable: firstDeliverable.trim(),
+      durationWeeks,
+      goal: req.body.goal || 'Ship a portfolio project',
       stage: stage || "Idea",
       commitment: commitment || "Flexible",
       githubUrl: githubUrl ? githubUrl.trim() : undefined,
@@ -80,17 +87,20 @@ projectsRouter.get("/projects", userAuth, async (req, res) => {
     const skip = (page - 1) * limit;
 
     const projects = await Project.find({})
-      .sort({ createdAt: -1 })
+      .sort({ createdAt: -1, _id: -1 })
       .skip(skip)
       .limit(limit)
       .populate("creator", "firstName lastName photoUrl skills")
-      .select("title description techStack rolesNeeded stage commitment githubUrl creator applications createdAt")
+      .select("title description techStack rolesNeeded roleOpenings firstDeliverable durationWeeks goal stage commitment githubUrl demoUrl outcome creator applications createdAt")
       .lean();
 
     const data = projects.map(({ applications, ...project }) => ({
       ...project,
       applicationsCount: applications ? applications.length : 0,
       hasApplied: applications ? applications.some((application) => application.user.toString() === req.user._id.toString()) : false,
+      isTeamMember: project.creator._id.toString() === req.user._id.toString() || applications.some(a => a.status === 'accepted' && a.user.toString() === req.user._id.toString()),
+      teamSize: 1 + applications.filter(a => a.status === 'accepted').length,
+      roleOpenings: (project.roleOpenings?.length ? project.roleOpenings : project.rolesNeeded.map(title => ({ title, seats: 1 }))).map(o => ({ ...o, filled: applications.filter(a => a.status === 'accepted' && (a.role || project.rolesNeeded[0]) === o.title).length })),
     }));
 
     return res.json({ data });
@@ -126,12 +136,12 @@ projectsRouter.post("/projects/:projectId/apply", userAuth, async (req, res) => 
       }
     }
 
-    project.applications.push({
-      user: req.user._id,
-      message: messageText ? messageText.trim() : "",
-    });
-
-    await project.save();
+    const role = req.body.role || project.rolesNeeded[0];
+    if (typeof role !== 'string' || !project.rolesNeeded.includes(role)) return res.status(400).json({ message: 'Choose an open project role' });
+    const opening = project.roleOpenings.find(o => o.title === role);
+    if (project.applications.filter(a => a.status === 'accepted' && (a.role || project.rolesNeeded[0]) === role).length >= (opening?.seats || 1)) return res.status(409).json({ message: 'Role is already filled' });
+    const result = await Project.updateOne({ _id: projectId, creator: { $ne: req.user._id }, applications: { $not: { $elemMatch: { user: req.user._id } } }, $expr: { $lt: [{ $size: '$applications' }, 200] } }, { $push: { applications: { user: req.user._id, role, message: messageText ? messageText.trim() : '' } }, $inc: { __v: 1 } }, { runValidators: true });
+    if (!result.modifiedCount) return res.status(409).json({ message: 'Already applied or application limit reached' });
     return res.status(201).json({ message: "Application sent successfully" });
   } catch (error) {
     return res.status(400).json({ message: "Unable to submit application" });
@@ -196,8 +206,14 @@ projectsRouter.patch("/projects/:projectId/applications/:applicationId", userAut
       return res.status(404).json({ message: "Application not found" });
     }
 
-    application.status = status;
-    await project.save();
+    if (application.status !== 'pending') return res.status(409).json({ message: 'Application has already been reviewed' });
+    if (status === 'accepted') {
+      const role = application.role || project.rolesNeeded[0];
+      const seats = project.roleOpenings.find(o => o.title === role)?.seats || 1;
+      if (project.applications.filter(a => a.status === 'accepted' && (a.role || project.rolesNeeded[0]) === role).length >= seats) return res.status(409).json({ message: 'Role is already filled' });
+    }
+    const result = await Project.updateOne({ _id: projectId, __v: project.__v, applications: { $elemMatch: { _id: applicationId, status: 'pending' } } }, { $set: { 'applications.$.status': status }, $inc: { __v: 1 } });
+    if (!result.modifiedCount) return res.status(409).json({ message: 'Project changed; reload and try again' });
 
     return res.json({ message: `Application ${status}` });
   } catch (error) {
@@ -252,10 +268,12 @@ projectsRouter.patch("/projects/:projectId", userAuth, async (req, res) => {
     }
 
     if (updates.rolesNeeded !== undefined) {
+      if (project.applications.length) return res.status(409).json({ message: 'Roles cannot change after applications arrive' });
       if (!Array.isArray(updates.rolesNeeded) || updates.rolesNeeded.length === 0 || updates.rolesNeeded.length > 20) {
         return res.status(400).json({ message: "Roles needed must be an array of 1 to 20 items" });
       }
       project.rolesNeeded = updates.rolesNeeded.map((r) => r.trim());
+      project.roleOpenings = project.rolesNeeded.map(title => ({ title, seats: 1 }));
     }
 
     if (updates.stage !== undefined) {
@@ -312,5 +330,3 @@ projectsRouter.delete("/projects/:projectId", userAuth, async (req, res) => {
 });
 
 module.exports = projectsRouter;
-
-

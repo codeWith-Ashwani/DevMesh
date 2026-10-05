@@ -9,6 +9,13 @@ const securityHeaders = require("./middlewares/securityHeaders");
 const { errorHandler, notFoundHandler } = require("./middlewares/errorHandler");
 
 const app = express();
+app.disable('x-powered-by');
+app.use(require('./middlewares/requestLog'));
+if (process.env.TRUST_PROXY_HOPS) {
+  const hops = Number(process.env.TRUST_PROXY_HOPS);
+  if (!Number.isInteger(hops) || hops < 0 || hops > 10) throw new Error('Invalid TRUST_PROXY_HOPS');
+  app.set('trust proxy', hops);
+}
 
 // 1. Security Headers Middleware
 app.use(securityHeaders);
@@ -28,6 +35,7 @@ app.use(express.urlencoded({ extended: true, limit: "50kb" }));
 
 // 4. Cookie Parser
 app.use(cookieParser());
+app.use(require('./middlewares/origin'));
 
 // 5. Liveness & Readiness Health Probes
 app.get("/health", (req, res) => {
@@ -37,7 +45,8 @@ app.get("/health", (req, res) => {
 app.get("/ready", (req, res) => {
   // readyState 1 = connected
   const isDbReady = mongoose.connection.readyState === 1;
-  if (!isDbReady) {
+  const redis = require('./config/redis').getRedis();
+  if (!isDbReady || (process.env.REDIS_URL && redis?.status !== 'ready')) {
     return res.status(503).json({
       status: "unavailable",
       database: "disconnected",
@@ -63,6 +72,8 @@ app.use("/", requestRouter);
 app.use("/", usersRouter);
 app.use("/", chatRouter);
 app.use("/", projectsRouter);
+app.use('/', require('./routes/conversations'));
+app.use('/', require('./routes/collaboration'));
 
 // 7. Centralized 404 Catch-All Handler
 app.use(notFoundHandler);
@@ -72,9 +83,16 @@ app.use(errorHandler);
 
 // 9. Process Server Lifecycle & Graceful Shutdown
 if (require.main === module) {
+  env.getJWTSecret();
   connectDB()
-    .then(() => {
-      const server = app.listen(env.PORT, () => {
+    .then(async () => {
+      const { connectRedis, closeRedis } = require('./config/redis');
+      const redis = await connectRedis();
+      await Promise.all(Object.values(mongoose.models).map(model => model.init()));
+      const server = require('http').createServer(app);
+      const realtime = await require('./realtime').attachRealtime(server, redis);
+      app.set('io', realtime.io);
+      server.listen(env.PORT, () => {
         console.log(`DevMesh Server running on port ${env.PORT} [${env.NODE_ENV}]`);
       });
 
@@ -85,10 +103,11 @@ if (require.main === module) {
         console.log(`Received ${signal}. Starting graceful shutdown...`);
 
         // Stop accepting new HTTP requests and finish active requests
-        server.close(async () => {
+        realtime.close().then(async () => {
           console.log("HTTP server closed.");
           try {
             await mongoose.connection.close(false);
+            await closeRedis();
             console.log("MongoDB connection closed.");
             process.exit(0);
           } catch (err) {

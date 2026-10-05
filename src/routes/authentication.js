@@ -63,7 +63,7 @@ authRouter.post("/login", loginLimiter, async (req, res) => {
 
   try {
     const { email, password } = req.body;
-    if (!email || !password) {
+    if (typeof email !== 'string' || typeof password !== 'string' || !email || !password || password.length > 256) {
       return res.status(400).json({ message: "Email and password are required" });
     }
 
@@ -90,8 +90,10 @@ authRouter.post("/login", loginLimiter, async (req, res) => {
 });
 
 // logout API
-authRouter.post("/logout", async (req, res) => {
+authRouter.post("/logout", require('../middlewares/auth'), async (req, res) => {
   try {
+    await User.updateOne({ _id: req.user._id }, { $inc: { authVersion: 1 } });
+    req.app.get('io')?.in(`user:${req.user._id}`).disconnectSockets(true);
     res.cookie("token", null, getClearCookieOptions());
     return res.json({ message: "User logged out successfully" });
   } catch (error) {
