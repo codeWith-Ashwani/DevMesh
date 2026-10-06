@@ -31,8 +31,9 @@ const projectSchema = new mongoose.Schema(
   { timestamps: true, optimisticConcurrency: true }
 );
 
-projectSchema.index({ createdAt: -1 });
+projectSchema.index({ createdAt: -1, _id: -1 });
 projectSchema.index({ creator: 1 });
+projectSchema.index({ 'applications.user': 1, 'applications.status': 1 });
 
 
 module.exports = mongoose.model("Project", projectSchema);

@@ -1,6 +1,14 @@
 const env = require("../config/env");
+const { isDatabaseUnavailable } = require('../utils/availability');
 
 const errorHandler = (err, req, res, next) => {
+  if (err.status === 503 || isDatabaseUnavailable(err)) {
+    res.set('Retry-After', '3');
+    return res.status(503).json({ message: 'Service temporarily unavailable. Please try again.' });
+  }
+  if (err.name === 'VersionError') {
+    return res.status(409).json({ message: 'Data changed; reload and try again' });
+  }
   // SyntaxError from body-parser on malformed JSON
   if (err instanceof SyntaxError && err.status === 400 && "body" in err) {
     return res.status(400).json({ message: "Invalid JSON payload in request" });

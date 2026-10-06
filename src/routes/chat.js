@@ -1,5 +1,6 @@
 const express = require("express");
 const chatRouter = express.Router();
+const mutationLimiter = require('../middlewares/mutationLimiter')('legacy-chat');
 const userAuth = require("../middlewares/auth");
 const ConnectionRequestModel = require("../models/conectionRequest");
 const Message = require("../models/message");
@@ -18,7 +19,7 @@ const hasAcceptedConnection = async (userId, otherUserId) => {
   });
 };
 
-chatRouter.get("/chat/:userId", userAuth, async (req, res) => {
+chatRouter.get("/chat/:userId", userAuth, mutationLimiter, async (req, res, next) => {
   try {
     const otherUserId = req.params.userId;
     if (!isValidObjectId(otherUserId)) {
@@ -30,14 +31,7 @@ chatRouter.get("/chat/:userId", userAuth, async (req, res) => {
       return res.status(403).json({ message: "You can only chat with accepted connections" });
     }
 
-    const parsedPage = parseInt(req.query.page, 10);
-    const page = !isNaN(parsedPage) && parsedPage > 0 ? parsedPage : 1;
-
-    const parsedLimit = parseInt(req.query.limit, 10);
-    let limit = !isNaN(parsedLimit) && parsedLimit > 0 ? parsedLimit : 30;
-    if (limit > 100) limit = 100;
-
-    const skip = (page - 1) * limit;
+    const { limit, skip } = require('../utils/pagination')(req.query, 30, 100);
 
     const messages = await Message.find({
       $or: [
@@ -55,11 +49,11 @@ chatRouter.get("/chat/:userId", userAuth, async (req, res) => {
 
     return res.json({ data: messages });
   } catch (error) {
-    return res.status(500).json({ message: "Unable to load this conversation" });
+    return next(error);
   }
 });
 
-chatRouter.post("/chat/:userId", userAuth, async (req, res) => {
+chatRouter.post("/chat/:userId", userAuth, mutationLimiter, async (req, res, next) => {
   try {
     const otherUserId = req.params.userId;
     if (!isValidObjectId(otherUserId)) {
@@ -88,7 +82,7 @@ chatRouter.post("/chat/:userId", userAuth, async (req, res) => {
 
     return res.status(201).json({ data: message });
   } catch (error) {
-    return res.status(500).json({ message: "Unable to send this message" });
+    return next(error);
   }
 });
 

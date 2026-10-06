@@ -7,6 +7,9 @@ const env = require('./config/env');
 const chat = require('./services/chat');
 const { throttle } = require('./services/throttle');
 const { fail } = require('./utils/domain');
+const mongoose = require('mongoose');
+const { isDatabaseUnavailable, unavailable } = require('./utils/availability');
+const { isValidObjectId } = require('./utils/validation');
 
 async function attachRealtime(server, redis) {
   const io = new Server(server, {
@@ -17,23 +20,31 @@ async function attachRealtime(server, redis) {
   });
   let subscriber;
   if (redis) {
-    subscriber = redis.duplicate();
+    subscriber = redis.duplicate({ lazyConnect: true });
     subscriber.on('error', () => console.error('Redis chat subscription unavailable'));
+    await subscriber.connect();
     await subscriber.ping();
     io.adapter(createAdapter(redis, subscriber, { key: 'devmesh:socket' }));
   }
   async function authenticate(socket) {
     const token = cookie.parseCookie(socket.handshake.headers.cookie || '').token;
-    const decoded = jwt.verify(token || '', env.getJWTSecret(), { algorithms: ['HS256'] });
-    const user = await User.findById(decoded._id).select('_id authVersion').lean();
+    let decoded;
+    try {
+      decoded = jwt.verify(token || '', env.getJWTSecret(), { algorithms: ['HS256'] });
+      if (!isValidObjectId(decoded._id) || !Number.isFinite(decoded.exp)) fail(401, 'Session expired');
+    } catch { fail(401, 'Session expired'); }
+    if (mongoose.connection.readyState !== 1) throw unavailable();
+    let user;
+    try { user = await User.findById(decoded._id).select('_id authVersion').lean(); }
+    catch (error) { throw isDatabaseUnavailable(error) ? unavailable() : error; }
     if (!user || (decoded.version || 0) !== (user.authVersion || 0)) fail(401, 'Session expired');
     return { userId: String(user._id), expires: decoded.exp * 1000 };
   }
   io.use(async (socket, next) => {
     try { socket.data = await authenticate(socket); await throttle(`handshake:${socket.data.userId}`, 30); next(); }
     catch (error) {
-      const status = [429, 503].includes(error.status) ? error.status : 401;
-      const failure = new Error(status === 401 ? 'Authentication required' : error.message);
+      const status = [401, 429, 503].includes(error.status) ? error.status : 500;
+      const failure = new Error(status === 401 ? 'Authentication required' : status === 500 ? 'Unable to authenticate' : error.message);
       failure.data = { status };
       next(failure);
     }
@@ -77,6 +88,6 @@ async function attachRealtime(server, redis) {
       return {};
     });
   });
-  return { io, close: async () => { await new Promise(resolve => io.close(resolve)); subscriber?.disconnect(); } };
+  return { io, isReady: () => !redis || (redis.status === 'ready' && subscriber?.status === 'ready'), close: async () => { await new Promise(resolve => io.close(resolve)); subscriber?.disconnect(); } };
 }
 module.exports = { attachRealtime };

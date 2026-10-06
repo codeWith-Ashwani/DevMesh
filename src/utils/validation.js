@@ -73,6 +73,7 @@ const validatePassword = (password) => {
   if (!password || typeof password !== "string") {
     throw new Error("Password is required");
   }
+  if (Buffer.byteLength(password, 'utf8') > 72) throw new Error('Password must be at most 72 UTF-8 bytes');
   if (
     !validator.isStrongPassword(password, {
       minLength: 8,
@@ -161,7 +162,7 @@ const validateEditProfileData = (req) => {
 
   if (age !== undefined && age !== null && age !== "") {
     const parsedAge = Number(age);
-    if (isNaN(parsedAge) || parsedAge < 18 || parsedAge > 120) {
+    if (!['string', 'number'].includes(typeof age) || !Number.isInteger(parsedAge) || parsedAge < 18 || parsedAge > 120) {
       throw new Error("Age must be a valid number of at least 18");
     }
   }
@@ -172,19 +173,19 @@ const validateEditProfileData = (req) => {
     }
   }
 
-  if (photoUrl) {
+  if (photoUrl !== undefined && photoUrl !== '') {
     if (typeof photoUrl !== "string" || !validator.isURL(photoUrl, { protocols: ["http", "https"], require_protocol: true })) {
       throw new Error("Invalid photo URL");
     }
   }
 
-  if (about !== undefined && about !== null) {
+  if (about !== undefined) {
     if (typeof about !== "string" || about.length > 2000) {
       throw new Error("About section cannot exceed 2000 characters");
     }
   }
 
-  if (skills !== undefined && skills !== null) {
+  if (skills !== undefined) {
     if (!Array.isArray(skills)) {
       throw new Error("Skills must be an array of strings");
     }
@@ -199,6 +200,7 @@ const validateEditProfileData = (req) => {
   }
 
   const urlValidator = (url, name) => {
+    if (url !== undefined && (typeof url !== 'string' || url.length > 500)) throw new Error(`Invalid ${name} URL`);
     if (url && typeof url === "string" && url.trim() !== "") {
       if (!validator.isURL(url.trim(), { protocols: ["http", "https"], require_protocol: true })) {
         throw new Error(`Invalid ${name} URL`);
@@ -237,4 +239,3 @@ module.exports = {
   SAFE_USER_FIELDS,
   PUBLIC_USER_FIELDS,
 };
-

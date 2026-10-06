@@ -33,7 +33,10 @@ const attachConnectionListeners = () => {
 const connectDB = async () => {
   attachConnectionListeners();
   const connectionString = env.getDBConnectionString();
-  return mongoose.connect(connectionString);
+  // Bound outage and pool waits so requests finish before the browser timeout.
+  mongoose.set('bufferCommands', false);
+  mongoose.set('maxTimeMS', 10000);
+  return mongoose.connect(connectionString, { serverSelectionTimeoutMS: 5000, waitQueueTimeoutMS: 5000, maxPoolSize: 20, minPoolSize: 0 });
 };
 
 module.exports = connectDB;

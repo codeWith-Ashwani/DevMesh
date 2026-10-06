@@ -3,13 +3,15 @@ const requestsRouter = express.Router();
 const userAuth = require("../middlewares/auth");
 const ConnectionRequestModel = require("../models/conectionRequest");
 const User = require("../models/user");
+const mutationLimiter = require('../middlewares/mutationLimiter')('connections');
 const { isValidObjectId } = require("../utils/validation");
 
 // sending connection request
 requestsRouter.post(
   "/request/send/:status/:toUserId",
   userAuth,
-  async (req, res) => {
+  mutationLimiter,
+  async (req, res, next) => {
     try {
       const fromUserId = req.user._id;
       const { toUserId, status } = req.params;
@@ -62,7 +64,8 @@ requestsRouter.post(
         .status(200)
         .json({ message: "Connection request sent successfully", data });
     } catch (error) {
-      return res.status(500).json({ message: "Error sending connection request" });
+      if (error.code === 11000) return res.status(409).json({ message: 'Connection request already exists' });
+      return next(error);
     }
   }
 );
@@ -71,7 +74,8 @@ requestsRouter.post(
 requestsRouter.post(
   "/request/review/:status/:requestId",
   userAuth,
-  async (req, res) => {
+  mutationLimiter,
+  async (req, res, next) => {
     try {
       const loggedInUser = req.user;
       const { status, requestId } = req.params;
@@ -107,14 +111,14 @@ requestsRouter.post(
           .json({ message: "Connection request is not in a pending review state" });
       }
 
-      connectionRequest.status = status;
-      const data = await connectionRequest.save();
+      const data = await ConnectionRequestModel.findOneAndUpdate({ _id: requestId, toUserId: loggedInUser._id, status: 'interested' }, { $set: { status } }, { returnDocument: 'after', runValidators: true });
+      if (!data) return res.status(409).json({ message: 'Connection request has already been reviewed' });
       return res.status(200).json({
         message: "Connection request reviewed successfully",
         data,
       });
     } catch (error) {
-      return res.status(500).json({ message: "Error reviewing connection request" });
+      return next(error);
     }
   }
 );

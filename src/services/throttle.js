@@ -15,7 +15,13 @@ async function throttle(key, max = 60, window = 60000) {
   }
   const now = Date.now();
   let record = memory.get(key);
-  if (!record || record.until <= now) { record = { hits: 0, until: now + window }; memory.set(key, record); }
+  if (!record || record.until <= now) {
+    if (!record && memory.size >= 10000) {
+      for (const [entry, value] of memory) if (value.until <= now) memory.delete(entry);
+      if (memory.size >= 10000) fail(503, 'Rate limiter temporarily unavailable');
+    }
+    record = { hits: 0, until: now + window }; memory.set(key, record);
+  }
   if (++record.hits > max) fail(429, 'Too many events; please wait');
 }
 module.exports = { throttle };

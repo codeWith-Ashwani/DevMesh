@@ -2,6 +2,7 @@ const mongoose = require("mongoose");
 
 const messageSchema = new mongoose.Schema(
   {
+    chatImported: { type: Boolean, default: false },
     fromUserId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
@@ -25,6 +26,7 @@ const messageSchema = new mongoose.Schema(
 
 messageSchema.index({ fromUserId: 1, toUserId: 1, createdAt: -1 });
 messageSchema.index({ toUserId: 1, fromUserId: 1, createdAt: -1 });
+messageSchema.index({ fromUserId: 1, toUserId: 1, chatImported: 1, _id: 1 });
 
 
 module.exports = mongoose.model("Message", messageSchema);

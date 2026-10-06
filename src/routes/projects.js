@@ -5,28 +5,29 @@ const userAuth = require("../middlewares/auth");
 const { isValidObjectId } = require("../utils/validation");
 
 const projectsRouter = express.Router();
+const mutationLimiter = require('../middlewares/mutationLimiter')('projects');
 const allowedStages = ["Idea", "Building", "Launched"];
 const allowedCommitments = ["Flexible", "5 hrs/week", "10 hrs/week", "20+ hrs/week"];
 
-projectsRouter.post("/projects", userAuth, async (req, res) => {
+projectsRouter.post("/projects", userAuth, mutationLimiter, async (req, res, next) => {
   try {
     const { title, description, techStack, rolesNeeded, stage, commitment, githubUrl, firstDeliverable = '', durationWeeks = 4, roleOpenings } = req.body;
     if (typeof firstDeliverable !== 'string' || firstDeliverable.length > 500 || !Number.isInteger(durationWeeks) || durationWeeks < 1 || durationWeeks > 52) return res.status(400).json({ message: 'Invalid deliverable or duration' });
 
-    if (!title || typeof title !== "string" || title.trim().length < 3 || title.trim().length > 100) {
-      return res.status(400).json({ message: "Title must be between 3 and 100 characters" });
+    if (!title || typeof title !== "string" || title.trim().length < 5 || title.trim().length > 100) {
+      return res.status(400).json({ message: "Title must be between 5 and 100 characters" });
     }
 
-    if (!description || typeof description !== "string" || description.trim().length < 10 || description.trim().length > 2000) {
-      return res.status(400).json({ message: "Description must be between 10 and 2000 characters" });
+    if (!description || typeof description !== "string" || description.trim().length < 20 || description.trim().length > 2000) {
+      return res.status(400).json({ message: "Description must be between 20 and 2000 characters" });
     }
 
     if (!Array.isArray(techStack) || techStack.length === 0 || techStack.length > 30) {
       return res.status(400).json({ message: "Tech stack must be an array of 1 to 30 items" });
     }
     for (const tech of techStack) {
-      if (typeof tech !== "string" || tech.trim().length === 0 || tech.trim().length > 50) {
-        return res.status(400).json({ message: "Each tech stack item must be a non-empty string up to 50 characters" });
+      if (typeof tech !== "string" || tech.trim().length === 0 || tech.trim().length > 40) {
+        return res.status(400).json({ message: "Each tech stack item must be a non-empty string up to 40 characters" });
       }
     }
 
@@ -34,8 +35,8 @@ projectsRouter.post("/projects", userAuth, async (req, res) => {
       return res.status(400).json({ message: "Roles needed must be an array of 1 to 20 items" });
     }
     for (const role of rolesNeeded) {
-      if (typeof role !== "string" || role.trim().length === 0 || role.trim().length > 50) {
-        return res.status(400).json({ message: "Each role must be a non-empty string up to 50 characters" });
+      if (typeof role !== "string" || role.trim().length === 0 || role.trim().length > 60) {
+        return res.status(400).json({ message: "Each role must be a non-empty string up to 60 characters" });
       }
     }
     const openings = roleOpenings || rolesNeeded.map(title => ({ title, seats: 1 }));
@@ -71,30 +72,23 @@ projectsRouter.post("/projects", userAuth, async (req, res) => {
 
     return res.status(201).json({ data: project });
   } catch (error) {
-    return res.status(400).json({ message: "Unable to create project. Check the project details and try again." });
+    return next(error);
   }
 });
 
-projectsRouter.get("/projects", userAuth, async (req, res) => {
+projectsRouter.get("/projects", userAuth, mutationLimiter, async (req, res, next) => {
   try {
-    const parsedPage = parseInt(req.query.page, 10);
-    const page = !isNaN(parsedPage) && parsedPage > 0 ? parsedPage : 1;
-
-    const parsedLimit = parseInt(req.query.limit, 10);
-    let limit = !isNaN(parsedLimit) && parsedLimit > 0 ? parsedLimit : 10;
-    if (limit > 50) limit = 50;
-
-    const skip = (page - 1) * limit;
+    const { limit, skip } = require('../utils/pagination')(req.query, 10, 50);
 
     const projects = await Project.find({})
       .sort({ createdAt: -1, _id: -1 })
       .skip(skip)
       .limit(limit)
       .populate("creator", "firstName lastName photoUrl skills")
-      .select("title description techStack rolesNeeded roleOpenings firstDeliverable durationWeeks goal stage commitment githubUrl demoUrl outcome creator applications createdAt")
+      .select("title description techStack rolesNeeded roleOpenings firstDeliverable durationWeeks goal stage commitment githubUrl demoUrl outcome creator applications.user applications.status applications.role createdAt")
       .lean();
 
-    const data = projects.map(({ applications, ...project }) => ({
+    const data = projects.filter(project => project.creator).map(({ applications = [], ...project }) => ({
       ...project,
       applicationsCount: applications ? applications.length : 0,
       applicationStatus: applications.find(a => a.user.toString() === req.user._id.toString())?.status || null,
@@ -106,11 +100,11 @@ projectsRouter.get("/projects", userAuth, async (req, res) => {
 
     return res.json({ data });
   } catch (error) {
-    return res.status(500).json({ message: "Unable to fetch projects" });
+    return next(error);
   }
 });
 
-projectsRouter.post("/projects/:projectId/apply", userAuth, async (req, res) => {
+projectsRouter.post("/projects/:projectId/apply", userAuth, mutationLimiter, async (req, res, next) => {
   try {
     const { projectId } = req.params;
     if (!isValidObjectId(projectId)) {
@@ -145,11 +139,11 @@ projectsRouter.post("/projects/:projectId/apply", userAuth, async (req, res) => 
     if (!result.modifiedCount) return res.status(409).json({ message: 'Already applied or application limit reached' });
     return res.status(201).json({ message: "Application sent successfully" });
   } catch (error) {
-    return res.status(400).json({ message: "Unable to submit application" });
+    return next(error);
   }
 });
 
-projectsRouter.get("/projects/:projectId/applications", userAuth, async (req, res) => {
+projectsRouter.get("/projects/:projectId/applications", userAuth, mutationLimiter, async (req, res, next) => {
   try {
     const { projectId } = req.params;
     if (!isValidObjectId(projectId)) {
@@ -169,14 +163,14 @@ projectsRouter.get("/projects/:projectId/applications", userAuth, async (req, re
       return res.status(403).json({ message: "Access denied: You can only view applications for your own projects" });
     }
 
-    return res.json({ data: project.applications || [] });
+    return res.json({ data: (project.applications || []).filter(application => application.user) });
   } catch (error) {
-    return res.status(500).json({ message: "Unable to fetch applications" });
+    return next(error);
   }
 });
 
 
-projectsRouter.patch("/projects/:projectId/applications/:applicationId", userAuth, async (req, res) => {
+projectsRouter.patch("/projects/:projectId/applications/:applicationId", userAuth, mutationLimiter, async (req, res, next) => {
   try {
     const { projectId, applicationId } = req.params;
     const { status } = req.body;
@@ -218,11 +212,11 @@ projectsRouter.patch("/projects/:projectId/applications/:applicationId", userAut
 
     return res.json({ message: `Application ${status}` });
   } catch (error) {
-    return res.status(500).json({ message: "Unable to review application" });
+    return next(error);
   }
 });
 
-projectsRouter.patch("/projects/:projectId", userAuth, async (req, res) => {
+projectsRouter.patch("/projects/:projectId", userAuth, mutationLimiter, async (req, res, next) => {
   try {
     const { projectId } = req.params;
     if (!isValidObjectId(projectId)) {
@@ -248,15 +242,15 @@ projectsRouter.patch("/projects/:projectId", userAuth, async (req, res) => {
     }
 
     if (updates.title !== undefined) {
-      if (typeof updates.title !== "string" || updates.title.trim().length < 3 || updates.title.trim().length > 100) {
-        return res.status(400).json({ message: "Title must be between 3 and 100 characters" });
+      if (typeof updates.title !== "string" || updates.title.trim().length < 5 || updates.title.trim().length > 100) {
+        return res.status(400).json({ message: "Title must be between 5 and 100 characters" });
       }
       project.title = updates.title.trim();
     }
 
     if (updates.description !== undefined) {
-      if (typeof updates.description !== "string" || updates.description.trim().length < 10 || updates.description.trim().length > 2000) {
-        return res.status(400).json({ message: "Description must be between 10 and 2000 characters" });
+      if (typeof updates.description !== "string" || updates.description.trim().length < 20 || updates.description.trim().length > 2000) {
+        return res.status(400).json({ message: "Description must be between 20 and 2000 characters" });
       }
       project.description = updates.description.trim();
     }
@@ -265,6 +259,7 @@ projectsRouter.patch("/projects/:projectId", userAuth, async (req, res) => {
       if (!Array.isArray(updates.techStack) || updates.techStack.length === 0 || updates.techStack.length > 30) {
         return res.status(400).json({ message: "Tech stack must be an array of 1 to 30 items" });
       }
+      if (updates.techStack.some(s => typeof s !== 'string' || !s.trim() || s.trim().length > 40)) return res.status(400).json({ message: 'Each tech stack item must be a non-empty string up to 40 characters' });
       project.techStack = updates.techStack.map((s) => s.trim());
     }
 
@@ -273,6 +268,7 @@ projectsRouter.patch("/projects/:projectId", userAuth, async (req, res) => {
       if (!Array.isArray(updates.rolesNeeded) || updates.rolesNeeded.length === 0 || updates.rolesNeeded.length > 20) {
         return res.status(400).json({ message: "Roles needed must be an array of 1 to 20 items" });
       }
+      if (updates.rolesNeeded.some(r => typeof r !== 'string' || !r.trim() || r.trim().length > 60) || new Set(updates.rolesNeeded.map(r => r.trim().toLowerCase())).size !== updates.rolesNeeded.length) return res.status(400).json({ message: 'Provide unique non-empty roles up to 60 characters each' });
       project.rolesNeeded = updates.rolesNeeded.map((r) => r.trim());
       project.roleOpenings = project.rolesNeeded.map(title => ({ title, seats: 1 }));
     }
@@ -301,11 +297,11 @@ projectsRouter.patch("/projects/:projectId", userAuth, async (req, res) => {
     const savedProject = await project.save();
     return res.json({ message: "Project updated successfully", data: savedProject });
   } catch (error) {
-    return res.status(500).json({ message: "Unable to update project" });
+    return next(error);
   }
 });
 
-projectsRouter.delete("/projects/:projectId", userAuth, async (req, res) => {
+projectsRouter.delete("/projects/:projectId", userAuth, mutationLimiter, async (req, res, next) => {
   try {
     const { projectId } = req.params;
     if (!isValidObjectId(projectId)) {
@@ -325,7 +321,7 @@ projectsRouter.delete("/projects/:projectId", userAuth, async (req, res) => {
     await project.deleteOne();
     return res.json({ message: "Project deleted successfully" });
   } catch (error) {
-    return res.status(500).json({ message: "Unable to delete project" });
+    return next(error);
   }
 
 });

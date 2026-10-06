@@ -37,7 +37,7 @@ async function access(userId, conversationId) {
     trialProjectExists = trial && await Project.exists({ _id: trial.project });
   }
   if (conversation.kind === 'project') {
-    project = await Project.findById(conversation.project).lean();
+    project = await Project.findById(conversation.project).select('creator applications.user applications.status').lean();
   }
   const members = currentMembers(conversation, project, trial, trialProjectExists);
   if (!members.includes(String(userId))) fail(403, 'Conversation access denied');
@@ -55,11 +55,27 @@ async function openDirect(userId, peerId) {
     conversation = await Conversation.findOneAndUpdate({ key }, { $setOnInsert: { kind: 'direct', owner: userId, members, key } }, { upsert: true, returnDocument: 'after' });
   } catch (e) { if (e.code !== 11000) throw e; conversation = await Conversation.findOne({ key }); }
   // Preserve existing personal history. Stable IDs make concurrent imports idempotent.
-  const legacy = LegacyMessage.find({ $or: [{ fromUserId: userId, toUserId: peerId }, { fromUserId: peerId, toUserId: userId }] }).lean().cursor();
-  for await (const m of legacy) {
-    try { await ChatMessage.updateOne({ _id: m._id }, { $setOnInsert: { conversation: conversation._id, sender: m.fromUserId, clientId: `legacy:${m._id}`, text: m.text, createdAt: m.createdAt, updatedAt: m.updatedAt } }, { upsert: true, timestamps: false }); }
-    catch (e) { if (e.code !== 11000) throw e; }
+  // Per-message completion survives retries and writers with older ObjectIds.
+  const filter = { chatImported: { $ne: true }, $or: [{ fromUserId: userId, toUserId: peerId }, { fromUserId: peerId, toUserId: userId }] };
+  const legacy = LegacyMessage.find(filter).sort({ _id: 1 }).lean().cursor({ batchSize: 100 });
+  let batch = [];
+  async function importBatch() {
+    try {
+      await ChatMessage.bulkWrite(batch.map(m => ({ updateOne: {
+        filter: { _id: m._id }, update: { $setOnInsert: { conversation: conversation._id, sender: m.fromUserId, clientId: `legacy:${m._id}`, text: m.text, createdAt: m.createdAt, updatedAt: m.updatedAt } }, upsert: true, timestamps: false,
+      } })), { ordered: false, timestamps: false });
+    } catch (error) {
+      // Concurrent imports can win the same upsert. Other failures must retry.
+      if (error.code !== 11000 || !error.writeErrors?.length || error.writeErrors.some(e => e.code !== 11000) || error.writeConcernErrors?.length) throw error;
+    }
+    await LegacyMessage.updateMany({ _id: { $in: batch.map(message => message._id) } }, { $set: { chatImported: true } });
+    batch = [];
   }
+  for await (const message of legacy) {
+    batch.push(message);
+    if (batch.length === 100) await importBatch();
+  }
+  if (batch.length) await importBatch();
   return conversation;
 }
 async function createGroup(userId, input) {
@@ -67,7 +83,12 @@ async function createGroup(userId, input) {
   if (!Array.isArray(input.members) || input.members.length < 1 || input.members.length > 49) fail(400, 'Choose 1-49 collaborators');
   const members = [...new Set([String(userId), ...input.members.map(v => String(id(v)))])];
   if (members.length < 2) fail(400, 'Choose another collaborator');
-  for (const peer of members.filter(v => v !== String(userId))) if (!await connected(userId, peer)) fail(403, 'Invite accepted connections only');
+  const peers = members.filter(v => v !== String(userId));
+  const connections = await Connection.find({ status: 'accepted', $or: [
+    { fromUserId: userId, toUserId: { $in: peers } }, { toUserId: userId, fromUserId: { $in: peers } },
+  ] }).select('fromUserId toUserId').lean();
+  const accepted = new Set(connections.map(c => String(c.fromUserId) === String(userId) ? String(c.toUserId) : String(c.fromUserId)));
+  if (peers.some(peer => !accepted.has(peer))) fail(403, 'Invite accepted connections only');
   return Conversation.create({ kind: 'group', name, owner: userId, members });
 }
 async function openProject(userId, projectId) {
@@ -189,6 +210,7 @@ async function openTrial(userId, trialId) {
   if (!trial || !['active', 'completed'].includes(trial.status)) fail(403, 'Accept the trial before chatting');
   const members = [String(trial.owner), String(trial.participant)];
   if (!members.includes(String(userId))) fail(403, 'Trial access denied');
+  if (!await Project.exists({ _id: trial.project })) fail(403, 'Trial chat is unavailable');
   const key = `trial:${trialId}`;
   try { return await Conversation.findOneAndUpdate({ key }, { $setOnInsert: { kind: 'trial', name: 'Collaboration trial', owner: trial.owner, members, trial: trialId, key } }, { upsert: true, returnDocument: 'after' }); }
   catch(e) { if (e.code !== 11000) throw e; return Conversation.findOne({ key }); }

@@ -7,7 +7,7 @@ const User = require("../models/user");
 const bcrypt = require("bcrypt");
 
 // signup API
-authRouter.post("/signup", signupLimiter, async (req, res) => {
+authRouter.post("/signup", signupLimiter, async (req, res, next) => {
   try {
     // validation of data
     validateSingUpData(req);
@@ -54,12 +54,12 @@ authRouter.post("/signup", signupLimiter, async (req, res) => {
     ) {
       return res.status(400).json({ message: error.message });
     }
-    return res.status(500).json({ message: "Error signing up user" });
+    return next(error);
   }
 });
 
 // login API
-authRouter.post("/login", loginLimiter, async (req, res) => {
+authRouter.post("/login", loginLimiter, async (req, res, next) => {
 
   try {
     const { email, password } = req.body;
@@ -85,19 +85,19 @@ authRouter.post("/login", loginLimiter, async (req, res) => {
     res.cookie("token", token, getCookieOptions());
     return res.json(getSafeUser(user));
   } catch (error) {
-    return res.status(500).json({ message: "Error logging in user" });
+    return next(error);
   }
 });
 
 // logout API
-authRouter.post("/logout", require('../middlewares/auth'), async (req, res) => {
+authRouter.post("/logout", require('../middlewares/auth'), async (req, res, next) => {
   try {
     await User.updateOne({ _id: req.user._id }, { $inc: { authVersion: 1 } });
     req.app.get('io')?.in(`user:${req.user._id}`).disconnectSockets(true);
     res.cookie("token", null, getClearCookieOptions());
     return res.json({ message: "User logged out successfully" });
   } catch (error) {
-    return res.status(500).json({ message: "Error logging out user" });
+    return next(error);
   }
 });
 

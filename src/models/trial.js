@@ -11,4 +11,6 @@ const schema = new mongoose.Schema({
   evidenceUrl: { type: String, maxlength: 500, default: '' },
 }, { timestamps: true });
 schema.index({ project: 1, _id: -1 });
+schema.index({ owner: 1, _id: -1 });
+schema.index({ participant: 1, _id: -1 });
 module.exports = mongoose.model('Trial', schema);

@@ -20,12 +20,19 @@ profileRouter.get("/profile/view", userAuth, async (req, res) => {
 });
 
 // update user profile API
-profileRouter.patch("/profile/edit", userAuth, async (req, res) => {
+profileRouter.patch("/profile/edit", userAuth, require('../middlewares/mutationLimiter')('profile'), async (req, res, next) => {
   try {
-    if (!validateEditProfileData(req)) {
+    let valid;
+    try { valid = validateEditProfileData(req); }
+    catch (error) { return res.status(400).json({ message: error.message }); }
+    if (!valid) {
       return res.status(400).json({ message: "Invalid fields in profile update" });
     }
     const loggedInUser = req.user;
+    for (const field of ['age', 'gender', 'lookingFor']) {
+      if (req.body[field] === '' || req.body[field] === null) req.body[field] = undefined;
+    }
+    if (req.body.photoUrl === '') req.body.photoUrl = undefined;
     loggedInUser.set(req.body);
     const savedUser = await loggedInUser.save();
     return res.json({
@@ -33,10 +40,7 @@ profileRouter.patch("/profile/edit", userAuth, async (req, res) => {
       data: getSafeUser(savedUser),
     });
   } catch (error) {
-    if (error.name === "ValidationError" || error.message) {
-      return res.status(400).json({ message: error.message || "Invalid profile data" });
-    }
-    return res.status(500).json({ message: "Error updating profile" });
+    return next(error);
   }
 });
 
@@ -45,7 +49,7 @@ const handlePasswordUpdate = async (req, res) => {
   try {
     const { password, newPassword } = req.body;
 
-    if (!password || !newPassword) {
+    if (typeof password !== 'string' || typeof newPassword !== 'string' || !password || !newPassword || password.length > 256) {
       return res
         .status(400)
         .json({ message: "Both current and new passwords are required" });

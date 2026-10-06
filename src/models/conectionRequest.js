@@ -1,6 +1,7 @@
 const mongoose = require("mongoose");
 
 const connectionRequestSchema = new mongoose.Schema({
+  pairKey: { type: String },
   fromUserId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "User",
@@ -25,6 +26,11 @@ const connectionRequestSchema = new mongoose.Schema({
 });
 
 connectionRequestSchema.index({ fromUserId: 1, toUserId: 1 }, { unique: true });
+// Existing rows remain valid; new writes cannot create two opposing requests.
+connectionRequestSchema.index({ pairKey: 1 }, { unique: true, partialFilterExpression: { pairKey: { $type: 'string' } } });
+connectionRequestSchema.pre('validate', function () {
+  if (this.isNew && this.fromUserId && this.toUserId) this.pairKey = [String(this.fromUserId), String(this.toUserId)].sort().join(':');
+});
 connectionRequestSchema.index({ toUserId: 1, status: 1 });
 connectionRequestSchema.index({ fromUserId: 1, status: 1 });
 

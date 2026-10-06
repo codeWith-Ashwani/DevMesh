@@ -33,7 +33,7 @@ router.get('/collaboration/recommendations', endpoint(async (req, res) => {
   if (!profile) fail(400, 'Renew your collaboration availability first');
   const filter = { creator: { $ne: req.user._id }, stage: { $ne: 'Launched' } };
   if (req.query.before) filter._id = { $lt: id(req.query.before) };
-  const projects = await Project.find(filter).sort({ _id: -1 }).limit(51).populate('creator', 'firstName lastName').lean();
+  const projects = await Project.find(filter).sort({ _id: -1 }).limit(51).select('title techStack rolesNeeded commitment durationWeeks firstDeliverable goal').lean();
   const hasMore = projects.length > 50;
   if (hasMore) projects.pop();
   const data = projects.map(p => ({ _id: p._id, title: p.title, techStack: p.techStack, rolesNeeded: p.rolesNeeded, commitment: p.commitment, durationWeeks: p.durationWeeks, firstDeliverable: p.firstDeliverable, ...match(profile, req.user, p) })).sort((a,b) => b.score - a.score || String(a._id).localeCompare(String(b._id)));
@@ -51,14 +51,15 @@ router.get('/projects/:projectId/collaborators', endpoint(async (req, res) => {
 router.get('/projects/:projectId/workspace', endpoint(async (req, res) => {
   const { project, members } = await team(req.user._id, req.params.projectId);
   const User = require('../models/user');
-  const [people, milestones, checkIns, trials, total, completed] = await Promise.all([
+  const [people, milestones, checkIns, trials, counts] = await Promise.all([
     User.find({ _id: { $in: members } }).select('firstName lastName photoUrl skills').lean(),
     Milestone.find({ project: project._id }).sort({ _id: -1 }).limit(50).lean(),
     CheckIn.find({ project: project._id }).sort({ _id: -1 }).limit(30).populate('user', 'firstName lastName').lean(),
     Trial.find({ project: project._id, $or: [{ owner: req.user._id }, { participant: req.user._id }] }).sort({ _id: -1 }).limit(30).lean(),
-    Milestone.countDocuments({ project: project._id }),
-    Milestone.countDocuments({ project: project._id, status: 'completed' }),
+    Milestone.aggregate([{ $match: { project: project._id } }, { $group: { _id: '$status', count: { $sum: 1 } } }]),
   ]);
+  const total = counts.reduce((sum, row) => sum + row.count, 0);
+  const completed = counts.find(row => row._id === 'completed')?.count || 0;
   const { applications, ...safeProject } = project;
   res.json({ data: { project: safeProject, members: people, milestones, checkIns, trials, progress: total ? Math.round(completed / total * 100) : 0, totalMilestones: total } });
 }));
@@ -92,6 +93,12 @@ router.delete('/projects/:projectId/team/:userId', endpoint(async (req, res) => 
   if (String(project.creator) !== String(req.user._id) && member !== String(req.user._id)) fail(403, 'Only the owner can remove another member');
   const result = await Project.updateOne({ _id: project._id, applications: { $elemMatch: { user: member, status: 'accepted' } } }, { $set: { 'applications.$.status': 'withdrawn' }, $inc: { __v: 1 } });
   if (!result.modifiedCount) fail(409, 'Member is no longer on the team');
+  const room = await require('../models/conversation').findOne({ project: project._id, kind: 'project' }).select('_id').lean();
+  if (room) {
+    const io = req.app.get('io');
+    io?.to(`user:${member}`).emit('conversation:removed', { conversationId: String(room._id) });
+    io?.to(projectMembers(project).filter(userId => userId !== member).map(userId => `user:${userId}`)).emit('conversation:updated', { conversationId: String(room._id) });
+  }
   res.json({ message: 'Team membership ended' });
 }));
 router.delete('/projects/:projectId/application', endpoint(async (req, res) => {

@@ -8,7 +8,7 @@ const { PUBLIC_USER_FIELDS } = require("../utils/validation");
 const publicProjection = PUBLIC_USER_FIELDS.filter((f) => f !== "_id");
 
 // Get all the pending connection requests for a user
-usersRouter.get("/user/requests/received", userAuth, async (req, res) => {
+usersRouter.get("/user/requests/received", userAuth, async (req, res, next) => {
   try {
     const loggedInUser = req.user;
     const connectionRequests = await ConnectionRequestModel.find({
@@ -20,15 +20,15 @@ usersRouter.get("/user/requests/received", userAuth, async (req, res) => {
 
     return res.status(200).json({
       message: "Connection requests fetched successfully",
-      data: connectionRequests,
+      data: connectionRequests.filter(row => row.fromUserId),
     });
   } catch (error) {
-    return res.status(500).json({ message: "Error fetching connection requests" });
+    return next(error);
   }
 });
 
 // Get all the accepted connections for a user
-usersRouter.get("/user/connections", userAuth, async (req, res) => {
+usersRouter.get("/user/connections", userAuth, async (req, res, next) => {
   try {
     const loggedInUser = req.user;
     const connectionRequests = await ConnectionRequestModel.find({
@@ -47,30 +47,23 @@ usersRouter.get("/user/connections", userAuth, async (req, res) => {
       } else {
         return row.fromUserId;
       }
-    });
+    }).filter(Boolean);
 
     return res.status(200).json({
       message: "Connections fetched successfully",
       data,
     });
   } catch (error) {
-    return res.status(500).json({ message: "Error fetching users" });
+    return next(error);
   }
 });
 
 // Feed API
-usersRouter.get("/feed", userAuth, async (req, res) => {
+usersRouter.get("/feed", userAuth, async (req, res, next) => {
   try {
     const loggedInUser = req.user;
 
-    const parsedPage = parseInt(req.query.page, 10);
-    const page = !isNaN(parsedPage) && parsedPage > 0 ? parsedPage : 1;
-
-    const parsedLimit = parseInt(req.query.limit, 10);
-    let limit = !isNaN(parsedLimit) && parsedLimit > 0 ? parsedLimit : 10;
-    if (limit > 50) limit = 50;
-
-    const skip = (page - 1) * limit;
+    const { limit, skip } = require('../utils/pagination')(req.query, 10, 50);
 
     // Find all connection requests sent and received
     const connectionRequests = await ConnectionRequestModel.find({
@@ -100,7 +93,7 @@ usersRouter.get("/feed", userAuth, async (req, res) => {
     return res.json(users);
 
   } catch (error) {
-    return res.status(500).json({ message: "Error fetching feed" });
+    return next(error);
   }
 });
 
