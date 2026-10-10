@@ -64,16 +64,17 @@ describe("Security Regression & Protection Suite", () => {
 
 
   it("should ensure Mongoose schemas and DTOs strip password hashes and __v", () => {
+    const passwordHash = require('bcrypt').hashSync('SerializationTest#2026', 10);
     const userDoc = new User({
       firstName: "SecUser",
       lastName: "Tester",
       email: "secuser@devmesh.example",
-      password: "HashedValue$123456",
+      password: passwordHash,
     });
 
     const serialized = JSON.stringify(userDoc);
     assert.strictEqual(serialized.includes("password"), false);
-    assert.strictEqual(serialized.includes("HashedValue"), false);
+    assert.strictEqual(serialized.includes(passwordHash), false);
 
     const safe = getSafeUser(userDoc);
     assert.strictEqual(safe.password, undefined);
@@ -81,6 +82,10 @@ describe("Security Regression & Protection Suite", () => {
     const pub = getPublicUser(userDoc);
     assert.strictEqual(pub.password, undefined);
     assert.strictEqual(pub.email, undefined);
+  });
+  it('rejects plaintext passwords in user documents before they can be saved', () => {
+    const user = new User({ firstName: 'Secure', email: 'hash-required@devmesh.example', password: 'PlaintextPassword#2026' });
+    assert.ok(user.validateSync()?.errors.password);
   });
 
   it("should enforce Rate Limiting returning 429 Too Many Requests", async () => {

@@ -20,7 +20,7 @@ authRouter.post("/signup", signupLimiter, async (req, res, next) => {
       return res.status(409).json({ message: "Email is already registered" });
     }
 
-    // Encrypt password
+    // Hash before persisting; plaintext is only used to verify credentials.
     const passwordHash = await bcrypt.hash(password, 10);
 
     // create user object to be saved in the database

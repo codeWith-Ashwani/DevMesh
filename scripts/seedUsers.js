@@ -2,7 +2,6 @@ const bcrypt = require("bcrypt");
 const mongoose = require("mongoose");
 const connectDB = require("../src/config/database");
 const User = require("../src/models/user");
-connectDB();
 
 
 const firstNames = ["Avery", "Noah", "Maya", "Theo", "Priya", "Ellis", "Zara", "Leo", "Amara", "Finn"];
@@ -24,8 +23,13 @@ const bios = [
 ];
 
 async function seedUsers() {
-  await mongoose.connection.asPromise();
-  const password = await bcrypt.hash("TempPass#2026", 10);
+  const suppliedPassword = process.env.SEED_USER_PASSWORD;
+  if (suppliedPassword !== undefined) require('../src/utils/validation').validatePassword(suppliedPassword);
+  await connectDB();
+  // No shared public login credential for demo accounts. The default random
+  // passwords are deliberately not logged; set SEED_USER_PASSWORD explicitly
+  // only when these accounts need to be used for a local demo login.
+  const passwords = await Promise.all(Array.from({ length: 100 }, () => bcrypt.hash(suppliedPassword || require('node:crypto').randomBytes(32).toString('hex'), 10)));
   const operations = Array.from({ length: 100 }, (_, index) => {
     const number = index + 1;
     const firstName = firstNames[index % firstNames.length];
@@ -40,7 +44,7 @@ async function seedUsers() {
             firstName,
             lastName,
             email: `demo.techie.${number}@devmesh.example`,
-            password,
+            password: passwords[index],
             age: 21 + (index % 18),
             gender: ["Male", "Female", "Other"][index % 3],
             photoUrl: `https://i.pravatar.cc/400?img=${(index % 70) + 1}`,

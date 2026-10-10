@@ -1,5 +1,5 @@
 process.env.NODE_ENV = 'test';
-process.env.JWT_SECRET = 'test_only_secret_987654321';
+process.env.JWT_SECRET = require('node:crypto').randomBytes(48).toString('hex');
 process.env.CLIENT_URL = 'http://localhost:5173';
 const http = require('http');
 const mongoose = require('mongoose');

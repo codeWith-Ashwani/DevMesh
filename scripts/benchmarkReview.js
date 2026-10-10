@@ -30,7 +30,8 @@ async function measure(fn, runs = 5) {
   try {
     await startTestServer();
     const owner = await createTestUser(), peer = await createTestUser();
-    const others = await User.create(Array.from({ length: 19 }, (_, i) => ({ firstName: `Peer${i}`, email: `benchmark-peer-${i}@devmesh.example`, password: 'isolated-fixture-password' })));
+    const password = await require('bcrypt').hash(require('node:crypto').randomBytes(32).toString('hex'), 10);
+    const others = await User.create(Array.from({ length: 19 }, (_, i) => ({ firstName: `Peer${i}`, email: `benchmark-peer-${i}@devmesh.example`, password })));
     const peers = [peer._id, ...others.map(user => user._id)];
     await Connection.insertMany(peers.map(toUserId => ({ fromUserId: owner._id, toUserId, status: 'accepted' })));
     await Legacy.insertMany(Array.from({ length: 300 }, (_, i) => ({ fromUserId: owner._id, toUserId: peer._id, text: `Previous message ${i}` })));

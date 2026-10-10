@@ -1,6 +1,8 @@
 const { describe, it, before, after, beforeEach } = require("node:test");
 const assert = require("node:assert");
 const jwt = require("jsonwebtoken");
+const bcrypt = require('bcrypt');
+const User = require('../src/models/user');
 const {
   startTestServer,
   stopTestServer,
@@ -44,6 +46,10 @@ describe("Authentication & Session Flows", () => {
     assert.strictEqual(res.data.data.firstName, "Grace");
     assert.strictEqual(res.data.data.password, undefined, "Password hash must not be exposed");
     assert.ok(res.setCookie.includes("HttpOnly"), "Auth cookie must be HttpOnly");
+    const stored = await User.findOne({ email }).select('password').lean();
+    assert.notStrictEqual(stored.password, 'StrongPassword#2026');
+    assert.strictEqual(await bcrypt.compare('StrongPassword#2026', stored.password), true);
+    assert.ok(bcrypt.getRounds(stored.password) >= 10);
   });
 
   it("should reject duplicate signup with 409 Conflict", async () => {
@@ -184,6 +190,10 @@ describe("Authentication & Session Flows", () => {
     );
     assert.strictEqual(successRes.status, 200);
     assert.strictEqual(successRes.data.message, "Password updated successfully");
+    const stored = await User.findOne({ email: user.email }).select('password').lean();
+    assert.notStrictEqual(stored.password, newPassword);
+    assert.strictEqual(await bcrypt.compare(newPassword, stored.password), true);
+    assert.ok(bcrypt.getRounds(stored.password) >= 10);
 
     // Old password no longer works
     const oldLogin = await request("POST", "/login", { email: user.email, password: user.password });

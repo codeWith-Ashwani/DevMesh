@@ -1,6 +1,6 @@
 // Isolated browser-test fixture. Never connects to the configured live database.
 process.env.NODE_ENV = 'test';
-process.env.JWT_SECRET = 'browser_test_secret_only_123456789';
+process.env.JWT_SECRET = require('node:crypto').randomBytes(48).toString('hex');
 process.env.CLIENT_URL = 'http://localhost:5173';
 // Browser scenarios use multiple authenticated contexts; production limits stay unchanged.
 process.env.RATE_LIMIT_LOGIN_MAX = '50';

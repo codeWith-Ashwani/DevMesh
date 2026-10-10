@@ -31,8 +31,10 @@ const userSchema = new mongoose.Schema(
     password: {
       type: String,
       required: true,
-      minlength: 8,
-      trim: true,
+      validate: {
+        validator: value => /^\$2[ab]\$(0[4-9]|[12]\d|3[01])\$[./A-Za-z0-9]{53}$/.test(value),
+        message: 'Password must be stored as a bcrypt hash',
+      },
     },
     age: {
       type: Number,
