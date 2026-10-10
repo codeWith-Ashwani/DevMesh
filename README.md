@@ -14,7 +14,7 @@ DevMesh helps developers find compatible collaborators, try a small milestone, f
 
 ## Stack and architecture
 
-React/Vite client → Express HTTP + Socket.IO API → MongoDB. Redis distributes live events; MongoDB stores durable messages. Cookie authentication and per-event membership checks protect conversations. See [API contracts](API.md), [deployment runbook](DEPLOYMENT.md), and [implementation plan](IMPLEMENTATION_PLAN.md).
+React/Vite client → Express HTTP + Socket.IO API → MongoDB. Redis distributes live events; MongoDB stores durable messages. Cookie authentication and per-event membership checks protect conversations.
 
 ## Local setup
 
@@ -28,9 +28,9 @@ Run `npm start`. Alternatively, set JWT_SECRET and run `docker compose up --buil
 
 Browser tests live in the frontend repository and launch `scripts/startBrowserTestServer.js`, an ephemeral fixture using fake accounts. CI runs functional tests, dependency audit and a Docker build.
 
-`npm run benchmark` seeds 5,000 chat messages in an isolated database and measures 200 history-page requests at concurrency 10. Results are recorded in BENCHMARK_RESULTS.json with the environment and error count. This local microbenchmark is reproducible evidence, not a production capacity claim.
+`npm run benchmark` seeds 5,000 chat messages in an isolated database and measures 200 history-page requests at concurrency 10. Results are saved locally in the ignored BENCHMARK_RESULTS.json file with the environment and error count. This local microbenchmark is reproducible evidence, not a production capacity claim.
 
-`npm run benchmark:inbox` measures a 30-conversation inbox with 50 messages per room, including receipts and correctness checks. The inbox batches current membership checks and uses indexed MongoDB lookups for message summaries instead of issuing queries per conversation. See [performance measurements](PERFORMANCE.md) for the baseline, results and hosting checks.
+`npm run benchmark:inbox` measures a 30-conversation inbox with 50 messages per room, including receipts and correctness checks. The inbox batches current membership checks and uses indexed MongoDB lookups for message summaries instead of issuing queries per conversation.
 
 ## Interview walkthrough
 
@@ -43,4 +43,4 @@ Browser tests live in the frontend repository and launch `scripts/startBrowserTe
 
 ## Practical limits
 
-Scores are preference fit, not verified ability. Applications are embedded and capped at 200/project. Discovery ranks batches, not the entire database. Live delivery is best-effort with durable replay. See the runbook for compatibility, view limits, cookie/proxy requirements and release checks. Production readiness requires verifying the actual hosting environment and representative load; this repository does not claim measured production capacity.
+Scores are preference fit, not verified ability. Applications are embedded and capped at 200/project. Discovery ranks batches, not the entire database. Live delivery is best-effort with durable replay. Production readiness requires verifying the actual hosting environment and representative load; this repository does not claim measured production capacity.
